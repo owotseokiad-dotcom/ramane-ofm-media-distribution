@@ -1,0 +1,5 @@
+Flask
+discord.py
+requests
+google-api-python-client
+yt-dlp
