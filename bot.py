@@ -21,7 +21,7 @@ def home():
     return f"{NOM_AGENCE} - Bot en ligne!"
 
 def run_flask():
-    port = int(os.environ.get("PORT", 10000)) # <-- C'EST CE QUI MANQUAIT BOSS
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
 # --- BOT DISCORD ---
@@ -36,7 +36,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 class GenerateView(discord.ui.View):
     def __init__(self, service_type):
         super().__init__(timeout=None)
-        self.service_type = service_type # 'google' ou 'instagram'
+        self.service_type = service_type
 
     @discord.ui.button(label="🎲 Générer un numéro", style=discord.ButtonStyle.success, custom_id="generate_num")
     async def generate(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -76,12 +76,10 @@ class ValidationView(discord.ui.View):
         channel = interaction.channel
         await channel.send(f"✅ Paiement validé par {interaction.user.mention} pour <@{self.client_id}>. Achat en cours sur 5sim... Boucle infinie activée jusqu'à livraison.")
 
-        # BOUCLE INFINIE RAMANE OFM
         tentative = 1
         while True:
             try:
                 async with aiohttp.ClientSession() as session:
-                    # 1. ACHAT
                     headers = {"Authorization": f"Bearer {FIVESIM_TOKEN}", "Accept": "application/json"}
                     async with session.get(f"https://5sim.net/v1/user/buy/activation/any/any/{self.service_type}", headers=headers) as resp:
                         data = await resp.json()
@@ -94,9 +92,8 @@ class ValidationView(discord.ui.View):
                         phone = data["phone"]
                         await channel.send(f"✅ **NUMÉRO LIVRÉ (Tentative {tentative}) pour <@{self.client_id}>** : `{phone}` (ID: {order_id}) - J'attends le code...")
 
-                    # 2. ATTENTE CODE 8 MIN
                     code = None
-                    for _ in range(16): # 16 x 30s = 8 min
+                    for _ in range(16):
                         await asyncio.sleep(30)
                         async with session.get(f"https://5sim.net/v1/user/check/{order_id}", headers=headers) as check_resp:
                             check_data = await check_resp.json()
@@ -106,9 +103,8 @@ class ValidationView(discord.ui.View):
 
                     if code:
                         await channel.send(f"📩 **CODE POUR <@{self.client_id}>** : `{code}` - Numéro {phone} - Livraison réussie ✅ BOSS bénéfice 110F")
-                        break # ON SORT DE LA BOUCLE INFINIE, C'EST GAGNÉ
+                        break
                     else:
-                        # 3. CANCEL AUTO + RACHAT AUTO
                         async with session.get(f"https://5sim.net/v1/user/cancel/{order_id}", headers=headers) as cancel_resp:
                             await channel.send(f"⚠️ Pas de code pour ID {order_id} (Tentative {tentative}). CANCEL AUTO fait -> Remboursement 5sim OK. Je rachète un nouveau numéro tout de suite (Tentative {tentative+1})...")
                         tentative += 1
@@ -129,8 +125,6 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot:
         return
-
-    # DETECTION CAPTURE DANS SALONS NUMEROS
     if message.attachments and ("numéro-gmail" in message.channel.name or "numéro-insta" in message.channel.name):
         service = "google" if "gmail" in message.channel.name else "instagram"
         embed = discord.Embed(
@@ -140,8 +134,7 @@ async def on_message(message):
         )
         embed.set_image(url=message.attachments[0].url)
         view = ValidationView(message.author.id, service)
-        await message.channel.send(content=f"<@&{os.getenv('BOSS_ROLE_ID', '')}> BOSS RAMANE OFM - Validation requise", embed=embed, view=view)
-
+        await message.channel.send(content=f"BOSS RAMANE OFM - Validation requise", embed=embed, view=view)
     await bot.process_commands(message)
 
 @bot.command()
@@ -155,7 +148,6 @@ async def media(ctx, *, lien=""):
         return
     await ctx.send(f"📥 **{NOM_AGENCE}** a reçu ton média : {lien}\nDistribution en cours...")
 
-# --- COMMANDES QUE TU AS DEMANDÉES ---
 @bot.command()
 async def setupgmail(ctx):
     embed = discord.Embed(
@@ -184,6 +176,39 @@ async def code(ctx, order_id: int):
         async with session.get(f"https://5sim.net/v1/user/check/{order_id}", headers=headers) as resp:
             data = await resp.json()
             await ctx.send(f"Check ID {order_id}: {data}")
+
+# ========== AJOUT DEMANDÉ PAR TOI BOSS - CRÉATION CATÉGORIE AUTO ==========
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setupbusiness(ctx):
+    guild = ctx.guild
+    # Crée la catégorie
+    category = await guild.create_category("💰 RAMANE OFM - BUSINESS")
+
+    # Overwrites
+    overwrites_stock = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        guild.me: discord.PermissionOverwrite(view_channel=True),
+        ctx.author: discord.PermissionOverwrite(view_channel=True)
+    }
+    overwrites_public = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=True, send_messages=False),
+        guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
+        ctx.author: discord.PermissionOverwrite(view_channel=True, send_messages=True)
+    }
+
+    # 4 Salons dedans comme tu veux
+    await guild.create_text_channel("🔒-mon-stock-5sim", category=category, overwrites=overwrites_stock, topic="TON STOCK 5SIM")
+    infos = await guild.create_text_channel("📢-infos-paiement", category=category, overwrites=overwrites_public, topic="Paiement 200F")
+    await infos.send(f"**💰 RAMANE OFM BUSINESS - 200F / NUMÉRO**\n\n📧 Gmail = 200F\n📸 Insta = 200F\n💳 MoMo: {MOMO_NUM}\nCrypto: {CRYPTO_ADDR}")
+
+    gmail = await guild.create_text_channel("📧-numéro-gmail", category=category, overwrites=overwrites_public)
+    await gmail.send(embed=discord.Embed(title="📧 SALON NUMÉROS GMAIL USA - RAMANE OFM", description="Prix 200F - Clique 🎲 - Paye - Envoie preuve ici", color=0x00ff00), view=GenerateView("google"))
+
+    insta = await guild.create_text_channel("📸-numéro-insta", category=category, overwrites=overwrites_public)
+    await insta.send(embed=discord.Embed(title="📸 SALON NUMÉROS INSTA USA - RAMANE OFM", description="Prix 200F - Clique 🎲 - Paye - Envoie preuve ici", color=0xE1306C), view=GenerateView("instagram"))
+
+    await ctx.send(f"✅ BOSS C'EST FAIT! Catégorie {category.name} créée avec tout ton business dedans. Nikel.")
 
 # --- LANCEMENT ---
 if __name__ == "__main__":
