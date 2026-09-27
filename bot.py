@@ -306,9 +306,18 @@ async def on_message(message):
 
 @bot.command()
 async def ping(ctx): await ctx.send(f"Pong! {NOM_AGENCE} ✅")
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setupbusiness(ctx): await ctx.send(f"✅ Setup business OK BOSS - {NOM_AGENCE}")
+
+# === AJOUT SEULEMENT POUR PACK - NE TOUCHE PAS TES ANCIENS ===
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setuppack(ctx):
+    embed = discord.Embed(title="🎬 PACK REELS 8+1 - RAMANE OFM", description="Clique sur le bouton pour générer ton pack 8 Reels + 1 Story\n\n⏰ Le pack s'auto-supprime après 20min", color=0xE1306C)
+    await ctx.send(embed=embed, view=PackGenerateView())
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def manager(ctx, member: discord.Member): await add_grade_logic(ctx, member, "Manager")
