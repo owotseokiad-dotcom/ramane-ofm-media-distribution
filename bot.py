@@ -158,6 +158,67 @@ async def setupbusiness(ctx):
     await insta.send(embed=embed_insta, view=GenerateView("instagram"))
     await ctx.send("✅ C'est fait BOSS. Tout arrangé nikel. Teste 🎲 maintenant.")
 
+# --- AJOUT GRADES - JE TOUCHE A RIEN D'AUTRE BOSS ---
+BOSS_PRIVATE_NAME = "mon-stock-5sim"
+GRADE_COLORS = {
+    "Manager": 0x3498db,
+    "Team Leader": 0xf1c40f,
+    "VA": 0x2ecc71,
+    "PRO": 0x9b59b6
+}
+
+async def add_grade_logic(ctx, member: discord.Member, grade_name: str):
+    guild = ctx.guild
+    role = discord.utils.get(guild.roles, name=grade_name)
+    if not role:
+        role = await guild.create_role(name=grade_name, color=discord.Color(GRADE_COLORS[grade_name]), reason=grade_name)
+
+    await member.add_roles(role)
+
+    # Manager et Team Leader => accès à tous les salons privés membres sauf ton stock
+    if grade_name in ["Manager", "Team Leader"]:
+        for channel in guild.channels:
+            if BOSS_PRIVATE_NAME in channel.name.lower():
+                continue
+            if isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
+                # Si salon privé (everyone ne voit pas)
+                if channel.overwrites_for(guild.default_role).view_channel == False:
+                    try:
+                        await channel.set_permissions(role, view_channel=True, send_messages=True, read_message_history=True, connect=True)
+                    except: pass
+
+    await ctx.send(f"✅ {member.mention} est maintenant **{grade_name}** BOSS")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def manager(ctx, member: discord.Member):
+    await add_grade_logic(ctx, member, "Manager")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def teamleader(ctx, member: discord.Member):
+    await add_grade_logic(ctx, member, "Team Leader")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def va(ctx, member: discord.Member):
+    await add_grade_logic(ctx, member, "VA")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def pro(ctx, member: discord.Member):
+    await add_grade_logic(ctx, member, "PRO")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def removegrade(ctx, member: discord.Member, *, grade_name: str):
+    role = discord.utils.get(ctx.guild.roles, name=grade_name)
+    if role and role in member.roles:
+        await member.remove_roles(role)
+        await ctx.send(f"✅ Grade {grade_name} retiré à {member.mention} BOSS")
+    else:
+        await ctx.send(f"❌ {member.mention} n'a pas {grade_name}")
+
 if __name__ == "__main__":
     threading.Thread(target=run_flask).start()
     if TOKEN: bot.run(TOKEN)
