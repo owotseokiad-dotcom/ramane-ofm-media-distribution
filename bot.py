@@ -24,7 +24,7 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- VUES CORRIGÉES - ANTI BUG "PAS REPONDU" ---
+# --- VUES FIX BUG "PAS REPONDU" ---
 class GenerateView(discord.ui.View):
     def __init__(self, service_type):
         super().__init__(timeout=None)
@@ -33,7 +33,6 @@ class GenerateView(discord.ui.View):
 
     @discord.ui.button(label="🎲 Générer un numéro - 200F", style=discord.ButtonStyle.success)
     async def generate(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # FIX 1 - defer direct, ça évite "pas répondu à temps" quand Render se réveille
         await interaction.response.defer(ephemeral=True)
         embed = discord.Embed(
             title=f"💳 PAIEMENT 200F - {NOM_AGENCE}",
@@ -63,7 +62,6 @@ class StockView(discord.ui.View):
 
     @discord.ui.button(label="📚 Comment recharger 5SIM?", style=discord.ButtonStyle.secondary)
     async def tuto(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # FIX 1 bis
         await interaction.response.defer(ephemeral=True)
         embed = discord.Embed(title="📚 COMMENT PAYER TES NUMÉROS - BOSS", description="**1.** Va sur 5sim.net\n**2.** Recharge avec Crypto (USDT) min 2$\n**3.** Tu n'as PAS besoin de stock BOSS\nLe bot achète tout seul quand tu valides un client. Boucle infinie jusqu'à livraison du code.", color=0x2b2d31)
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -122,7 +120,6 @@ class ValidationView(discord.ui.View):
 @bot.event
 async def on_ready():
     print(f"Connecté {bot.user}")
-    # FIX 2 - Recharger les boutons au démarrage pour qu'ils ne meurent jamais
     bot.add_view(GenerateView("google"))
     bot.add_view(GenerateView("instagram"))
     bot.add_view(StockView())
@@ -165,37 +162,29 @@ async def setupbusiness(ctx):
     await insta.send(embed=embed_insta, view=GenerateView("instagram"))
     await ctx.send("✅ C'est fait BOSS. Tout arrangé nikel. Teste 🎲 maintenant.")
 
-# --- AJOUT GRADES - FIX 403 ---
+# --- GRADES FIX 403 ---
 BOSS_PRIVATE_NAME = "mon-stock-5sim"
-GRADE_COLORS = {
-    "Manager": 0x3498db,
-    "Team Leader": 0xf1c40f,
-    "VA": 0x2ecc71,
-    "PRO": 0x9b59b6
-}
+GRADE_COLORS = {"Manager": 0x3498db, "Team Leader": 0xf1c40f, "VA": 0x2ecc71, "PRO": 0x9b59b6}
 
 async def add_grade_logic(ctx, member: discord.Member, grade_name: str):
     guild = ctx.guild
-    # FIX ROLE - Verifie que le bot est au dessus
     role = discord.utils.get(guild.roles, name=grade_name)
     if not role:
-        role = await guild.create_role(name=grade_name, color=discord.Color(GRADE_COLORS[grade_name]), reason=grade_name)
-        try:
-            # On met le nouveau role juste sous le bot
+        role = await guild.create_role(name=grade_name, color=discord.Color(GRADE_COLORS[grade_name]))
+    # FIX : on place le grade sous le bot pour éviter 403
+    try:
+        if guild.me.top_role.position <= role.position:
             await role.edit(position=guild.me.top_role.position - 1)
-        except: pass
+    except: pass
 
     if guild.me.top_role.position <= role.position:
-        await ctx.send(f"❌ BOSS monte le rôle **{guild.me.top_role.name}** tout en haut dans Paramètres > Rôles. Il est actuellement sous {grade_name} donc je ne peux pas le donner.")
+        await ctx.send(f"❌ BOSS monte le rôle **{guild.me.top_role.name}** tout en haut dans Paramètres > Rôles. Il est sous {grade_name} donc je peux pas le donner.")
         return
-
     await member.add_roles(role)
-
     if grade_name in ["Manager", "Team Leader"]:
         count=0
         for channel in guild.channels:
-            if BOSS_PRIVATE_NAME in channel.name.lower():
-                continue
+            if BOSS_PRIVATE_NAME in channel.name.lower(): continue
             if isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
                 if channel.overwrites_for(guild.default_role).view_channel == False:
                     try:
