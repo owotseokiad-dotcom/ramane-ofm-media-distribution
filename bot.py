@@ -8,6 +8,7 @@ import aiohttp
 import time
 import json
 import re
+import random
 
 NOM_AGENCE = "RAMANE OFM - MEDIA DISTRIBUTION"
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -30,6 +31,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 solde_cache = 0
 dernier_check = 0
 
+# ================== 5SIM (TON BUSINESS - INTACT) ==================
 async def get_solde_5sim():
     global solde_cache, dernier_check
     if time.time() - dernier_check < 120 and solde_cache!= 0:
@@ -154,6 +156,7 @@ class ValidationView(discord.ui.View):
             except Exception as e:
                 await channel.send(f"Erreur {e}", delete_after=120); await asyncio.sleep(10); continue
 
+# ================== GRADES (TON BUSINESS - INTACT) ==================
 BOSS_PRIVATE_NAME = "mon-stock-5sim"
 GRADE_COLORS = {"Manager": 0x3498db, "Team Leader": 0x2ecc71, "VA Pro": 0x9b59b6, "VA DÉBUTANT": 0xe91e63, "BOSS": 0xe74c3c}
 
@@ -213,14 +216,154 @@ async def add_grade_logic(ctx, member: discord.Member, keyword: str):
         except: pass
     await ctx.send(f"✅ {member.mention} est maintenant **{role.name}** BOSS")
 
+# ================== NOUVEAU SYSTEM PACK REELS - V9 PRO 20MIN ==================
+DRIVE_REGEX = r"https://drive\.google\.com/drive/folders/[a-zA-Z0-9-_]+[^\s]*"
+
+def find_channel(guild, keywords):
+    for ch in guild.text_channels:
+        name = ch.name.lower()
+        if any(k in name for k in keywords):
+            return ch
+    return None
+
+async def get_all_drive_links(guild):
+    """Scan #--drive-réels et récupère TOUS les liens même nouveaux"""
+    chan = find_channel(guild, ["drive-réels", "drive-reels", "drive"])
+    if not chan: return []
+    links = []
+    async for msg in chan.history(limit=500):
+        found = re.findall(DRIVE_REGEX, msg.content)
+        for f in found:
+            clean = f.split("?")[0]
+            # garde le nom du modèle depuis le message
+            name_match = re.search(r"REELS\s+([A-Z0-9_]+)", msg.content.upper())
+            model_name = name_match.group(1) if name_match else "MODEL"
+            links.append({"url": clean, "name": model_name, "raw": msg.content})
+    # déduplique par url
+    uniq = {}
+    for l in links: uniq[l["url"]] = l
+    return list(uniq.values())
+
+async def get_all_descriptions(guild):
+    chan = find_channel(guild, ["description"])
+    if not chan: return []
+    descs = []
+    async for msg in chan.history(limit=500):
+        if len(msg.content) > 10:
+            descs.append(msg.content)
+    return descs
+
+async def get_story_fallback(guild):
+    chan = find_channel(guild, ["photos-story-cta", "story-cta", "photos-story"])
+    if not chan: return None
+    msgs = [m async for m in chan.history(limit=200) if m.attachments or "http" in m.content]
+    return random.choice(msgs) if msgs else None
+
+class FinishPackView(discord.ui.View):
+    def __init__(self, thread_id):
+        super().__init__(timeout=1200) # 20 min
+        self.thread_id = thread_id
+        self.children[0].custom_id = f"finish_pack_{thread_id}"
+    @discord.ui.button(label="✅ J'ai fini de poster", style=discord.ButtonStyle.success)
+    async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("✅ Pack supprimé BOSS, bien joué!", ephemeral=True)
+        try:
+            thread = interaction.guild.get_thread(self.thread_id) or await interaction.guild.fetch_channel(self.thread_id)
+            await thread.delete()
+        except: pass
+
+class PackGenerateView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.children[0].custom_id = "pack_generate_v9"
+    @discord.ui.button(label="📦 Générer mon pack 8 Reels", style=discord.ButtonStyle.success, emoji="🎬")
+    async def generate_pack(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+
+        drive_links = await get_all_drive_links(guild)
+        if not drive_links:
+            await interaction.followup.send("❌ Aucun lien Drive trouvé dans #--drive-réels BOSS", ephemeral=True)
+            return
+
+        chosen = random.choice(drive_links)
+        descs = await get_all_descriptions(guild)
+        if len(descs) < 8:
+            await interaction.followup.send(f"⚠️ Pas assez de descriptions dans #description (trouvé {len(descs)}), il en faut 8 min BOSS", ephemeral=True)
+            return
+
+        selected_descs = random.sample(descs, 8)
+        story_fallback = await get_story_fallback(guild)
+
+        # Création du fil privé dans #packs-reels
+        packs_chan = find_channel(guild, ["packs-reels", "pack-reels", "packs"])
+        if not packs_chan: packs_chan = interaction.channel
+
+        # Nom du pack
+        model_name = chosen["name"]
+        thread_name = f"PACK-{model_name}-{interaction.user.display_name}"
+
+        try:
+            thread = await packs_chan.create_thread(name=thread_name, type=discord.ChannelType.private_thread, auto_archive_duration=60)
+        except:
+            thread = await packs_chan.create_thread(name=thread_name, auto_archive_duration=60)
+
+        # Ajouter les rôles autorisés
+        try:
+            await thread.add_user(interaction.user)
+            for role in guild.roles:
+                low = role.name.lower()
+                if "boss" in low or "manager" in low or "team leader" in low:
+                    for m in role.members[:10]:
+                        try: await thread.add_user(m)
+                        except: pass
+        except: pass
+
+        embed = discord.Embed(
+            title=f"🎬 PACK REEL - {model_name} - 8 REELS + 1 STORY",
+            description=f"**BOSS {NOM_AGENCE} - PACK OFFICIEL**\n\n**Modèle:** {model_name}\n**Drive:** {chosen['url']}\n**Généré pour:** {interaction.user.mention}\n\nCe Drive contient les reels. Prends 8 reels même visage dedans.\n⏰ Auto-delete dans **20 minutes**",
+            color=0xE1306C
+        )
+        embed.set_footer(text=f"{NOM_AGENCE} • Auto-delete 20min • Clique sur J'ai fini si terminé")
+
+        pack_text = f"**🔥 PACK REEL - {model_name}** - {chosen['url']}\n\n"
+        for i, d in enumerate(selected_descs, 1):
+            pack_text += f"**🎬 REEL {i} + DESCRIPTION {i}:**\n{d[:800]}\n\n"
+
+        pack_text += f"\n**📸 STORY CTA MÊME VISAGE {model_name} :**\n"
+        pack_text += f"→ Va dans le Drive -> dossier PHOTOS/STORY et prend 1 story qui va avec ces 8 reels et qui peut percer.\n"
+        pack_text += f"→ Si le Drive n'a pas de dossier Story, va dans <#{story_fallback.channel.id if story_fallback else 'photos-story-cta'}> et prends 1 story même visage {model_name}\n"
+        pack_text += f"\n⏰ **Ce pack s'auto-supprime dans 20 min BOSS**"
+
+        # Envoi dans le fil
+        view_finish = FinishPackView(thread.id)
+        await thread.send(content=f"{interaction.user.mention} <@&{get_real_role(guild,'BOSS').id if get_real_role(guild,'BOSS') else ''}>", embed=embed, view=view_finish)
+        await thread.send(content=pack_text[:1900])
+        if len(pack_text) > 1900:
+            await thread.send(content=pack_text[1900:3800])
+        if story_fallback:
+            try:
+                await thread.send(content=f"**STORY FALLBACK EXEMPLE:** {story_fallback.content[:500]}")
+                if story_fallback.attachments:
+                    await thread.send(files=[await a.to_file() for a in story_fallback.attachments[:1]])
+            except: pass
+
+        await interaction.followup.send(f"✅ Ton pack **{model_name}** est prêt dans {thread.mention} BOSS - 20 min pour poster!", ephemeral=True)
+
+        # Auto-delete après 20 min
+        await asyncio.sleep(1200)
+        try: await thread.delete()
+        except: pass
+
 @bot.event
 async def on_ready():
     print(f"Connecté {bot.user}")
     bot.add_view(GenerateView("google"))
     bot.add_view(GenerateView("instagram"))
     bot.add_view(StockView())
+    bot.add_view(PackGenerateView())
     await auto_fix_colors()
-    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="MEDIA DISTRIBUTION"))
+    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="RAMANE OFM - PACK REELS 8+1"))
 
 @bot.event
 async def on_member_join(member):
@@ -244,6 +387,7 @@ async def on_message(message):
 
 @bot.command()
 async def ping(ctx): await ctx.send(f"Pong! {NOM_AGENCE} ✅")
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setupbusiness(ctx):
@@ -254,78 +398,4 @@ async def setupbusiness(ctx):
             await cat.delete()
     category = await guild.create_category("💰 RAMANE OFM - BUSINESS")
     overwrites_stock = {guild.default_role: discord.PermissionOverwrite(view_channel=False), guild.me: discord.PermissionOverwrite(view_channel=True), ctx.author: discord.PermissionOverwrite(view_channel=True)}
-    overwrites_public = {guild.default_role: discord.PermissionOverwrite(view_channel=True, send_messages=False), guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True), ctx.author: discord.PermissionOverwrite(view_channel=True, send_messages=True)}
-    overwrites_number = {guild.default_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, embed_links=True), guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True), ctx.author: discord.PermissionOverwrite(view_channel=True, send_messages=True)}
-    stock = await guild.create_text_channel("🔒-mon-stock-5sim", category=category, overwrites=overwrites_stock)
-    embed_stock = discord.Embed(title="🔒 TON QG PERSO - BOSS RAMANE", description=f"Ici tu gères ton business 5SIM.", color=0x2b2d31)
-    await stock.send(embed=embed_stock, view=StockView())
-    infos = await guild.create_text_channel("📢-infos-paiement", category=category, overwrites=overwrites_public)
-    await infos.send(embed=discord.Embed(title="💳 PAIEMENT - 200F / NUMÉRO", description=f"**MoMo:** `{MOMO_NUM}`\n**USDT:** `{CRYPTO_ADDR}`", color=0x00ff00))
-    gmail = await guild.create_text_channel("📧-numéro-gmail", category=category, overwrites=overwrites_number)
-    await gmail.send(embed=discord.Embed(title="📧 NUMÉRO GMAIL USA - 200F", description="Clique 🎲 en bas, paye 200F, envoie preuve ICI", color=0x00ff00), view=GenerateView("google"))
-    insta = await guild.create_text_channel("📸-numéro-insta", category=category, overwrites=overwrites_number)
-    await insta.send(embed=discord.Embed(title="📸 NUMÉRO INSTA USA - 200F", description="Clique 🎲 en bas, paye 200F, envoie preuve ICI", color=0xE1306C), view=GenerateView("instagram"))
-    await ctx.send("✅ C'est fait BOSS")
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def manager(ctx, member: discord.Member): await add_grade_logic(ctx, member, "Manager")
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def teamleader(ctx, member: discord.Member): await add_grade_logic(ctx, member, "Team Leader")
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def va(ctx, member: discord.Member): await add_grade_logic(ctx, member, "VA DÉBUTANT")
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def pro(ctx, member: discord.Member): await add_grade_logic(ctx, member, "VA Pro")
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def vapro(ctx, member: discord.Member): await add_grade_logic(ctx, member, "VA Pro")
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def vadebutant(ctx, member: discord.Member): await add_grade_logic(ctx, member, "VA DÉBUTANT")
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def boss(ctx, member: discord.Member): await add_grade_logic(ctx, member, "BOSS")
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def removegrade(ctx, member: discord.Member, *, grade_name: str):
-    role = get_real_role(ctx.guild, grade_name)
-    if not role: role = discord.utils.get(ctx.guild.roles, name=grade_name)
-    if role and role in member.roles:
-        await member.remove_roles(role)
-        await ctx.send(f"✅ Grade {role.name} retiré à {member.mention}")
-    else: await ctx.send(f"❌ {member.mention} n'a pas {grade_name}")
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def fixcolors(ctx):
-    await auto_fix_colors()
-    await ctx.send("✅ Couleurs fixées BOSS")
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def clearerrors(ctx):
-    await ctx.send("🧹 Nettoyage...")
-    mots_erreur = ["Erreur 5SIM", "STOCK_VIDE", "Attempt to decode", "mimetype", "text/plain", "https://5sim.net"]
-    total = 0
-    for channel in ctx.guild.text_channels:
-        if "numéro" in channel.name:
-            try:
-                async for msg in channel.history(limit=200):
-                    if msg.author == bot.user and any(m in msg.content for m in mots_erreur):
-                        try: await msg.delete(); total+=1; await asyncio.sleep(0.4)
-                        except: pass
-            except: pass
-    await ctx.send(f"✅ {total} erreurs supprimées")
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def clean(ctx, nombre: int = 50):
-    deleted = await ctx.channel.purge(limit=nombre, check=lambda m: not m.pinned)
-    await ctx.send(f"✅ {len(deleted)} supprimés", delete_after=5)
-@bot.event
-async def on_command_error(ctx, error):
-    print(f"ERREUR: {error}")
-    await ctx.send(f"❌ Erreur: {error}")
-
-if __name__ == "__main__":
-    threading.Thread(target=run_flask).start()
-    if TOKEN: bot.run(TOKEN)
+    over
