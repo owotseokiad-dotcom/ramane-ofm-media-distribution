@@ -220,59 +220,46 @@ async def get_all_descriptions(guild):
         if len(msg.content) > 10: descs.append(msg.content)
     return descs
 
-class FinishPackView(discord.ui.View):
-    def __init__(self, thread_id):
-        super().__init__(timeout=1200)
-        self.thread_id = thread_id
-        self.children[0].custom_id = f"finish_pack_{thread_id}"
-    @discord.ui.button(label="✅ J'ai fini de poster", style=discord.ButtonStyle.success)
-    async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("✅ Pack supprimé BOSS, bien joué!", ephemeral=True)
-        try:
-            thread = interaction.guild.get_thread(self.thread_id) or await interaction.guild.fetch_channel(self.thread_id)
-            await thread.delete()
-        except: pass
-
+# ===== PACK CORRIGÉ : MÊME SALON + 20MIN + DESCRIPTIONS QUI VONT AVEC =====
 class PackGenerateView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.children[0].custom_id = "pack_generate_v9"
+        self.children[0].custom_id = "pack_generate_final_same_channel"
     @discord.ui.button(label="📦 Générer mon pack 8 Reels", style=discord.ButtonStyle.success, emoji="🎬")
     async def generate_pack(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
         drive_links = await get_all_drive_links(guild)
         if not drive_links:
-            await interaction.followup.send("❌ Aucun lien Drive trouvé dans #--drive-réels BOSS", ephemeral=True)
+            await interaction.followup.send("❌ Aucun lien Drive dans #--drive-réels BOSS", ephemeral=True)
             return
         chosen = random.choice(drive_links)
         descs = await get_all_descriptions(guild)
         if len(descs) < 8:
-            await interaction.followup.send(f"⚠️ Pas assez de descriptions (trouvé {len(descs)}), il en faut 8 min BOSS", ephemeral=True)
+            await interaction.followup.send(f"⚠️ Pas assez de descriptions dans #description ({len(descs)}/8) BOSS", ephemeral=True)
             return
         selected_descs = random.sample(descs, 8)
-        packs_chan = find_channel(guild, ["packs-reels", "pack-reels", "packs"])
-        if not packs_chan: packs_chan = interaction.channel
-        model_name = chosen["name"]
-        thread_name = f"PACK-{model_name}-{interaction.user.display_name}"
-        try:
-            thread = await packs_chan.create_thread(name=thread_name, type=discord.ChannelType.private_thread, auto_archive_duration=60)
-        except:
-            thread = await packs_chan.create_thread(name=thread_name, auto_archive_duration=60)
-        try: await thread.add_user(interaction.user)
-        except: pass
-        embed = discord.Embed(title=f"🎬 PACK REEL - {model_name} - 8 REELS + 1 STORY", description=f"**BOSS {NOM_AGENCE}**\n\n**Modèle:** {model_name}\n**Drive:** {chosen['url']}\n\n⏰ Auto-delete dans **20 minutes**", color=0xE1306C)
-        pack_text = f"**🔥 PACK REEL - {model_name}** - {chosen['url']}\n\n"
-        for i, d in enumerate(selected_descs, 1):
-            pack_text += f"**REEL {i}:**\n{d[:800]}\n\n"
-        view_finish = FinishPackView(thread.id)
-        await thread.send(embed=embed, view=view_finish)
-        await thread.send(content=pack_text[:1900])
-        if len(pack_text) > 1900: await thread.send(content=pack_text[1900:3800])
-        await interaction.followup.send(f"✅ Ton pack **{model_name}** est prêt dans {thread.mention} BOSS!", ephemeral=True)
+
+        sent = []
+        embed = discord.Embed(title=f"🎬 PACK REEL - {chosen['name']} - 8 REELS + 1 STORY", description=f"**BOSS {NOM_AGENCE}**\n\n**Modèle:** {chosen['name']}\n**Drive:** {chosen['url']}\n**Dossier:** REELS = 8 vidéos + STORY/PHOTO = 1 story même visage qui perce\n\n⏰ Auto-delete dans **20 minutes** - Même salon", color=0xE1306C)
+        m = await interaction.channel.send(content=f"🔥 **PACK pour {interaction.user.mention} - {chosen['name']}**", embed=embed)
+        sent.append(m)
+
+        for i in range(8):
+            txt = f"**🎬 REEL {i+1}/8 - {chosen['name']}**\nDrive: {chosen['url']}\nDossier REELS -> Vidéo {i+1}\n\n**📝 Description qui va avec (qui ramène des vues):**\n{selected_descs[i][:1000]}\n"
+            mm = await interaction.channel.send(content=txt)
+            sent.append(mm)
+
+        story_txt = f"**📸 STORY 1/1 - {chosen['name']} (même visage)**\nDrive: {chosen['url']} -> Dossier STORY / PHOTO\n⚠️ Si ce Drive n'a que des REELS, va dans #story / #photo pour prendre 1 story même visage BOSS"
+        ms = await interaction.channel.send(content=story_txt)
+        sent.append(ms)
+
+        await interaction.followup.send(f"✅ Pack **{chosen['name']}** généré ICI dans ce même salon BOSS! 8 Reels + descriptions + 1 Story - Supprime auto dans 20min", ephemeral=True)
+
         await asyncio.sleep(1200)
-        try: await thread.delete()
-        except: pass
+        for msg in sent:
+            try: await msg.delete()
+            except: pass
 
 @bot.event
 async def on_ready():
@@ -306,18 +293,14 @@ async def on_message(message):
 
 @bot.command()
 async def ping(ctx): await ctx.send(f"Pong! {NOM_AGENCE} ✅")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setupbusiness(ctx): await ctx.send(f"✅ Setup business OK BOSS - {NOM_AGENCE}")
-
-# === AJOUT SEULEMENT POUR PACK - NE TOUCHE PAS TES ANCIENS ===
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setuppack(ctx):
-    embed = discord.Embed(title="🎬 PACK REELS 8+1 - RAMANE OFM", description="Clique sur le bouton pour générer ton pack 8 Reels + 1 Story\n\n⏰ Le pack s'auto-supprime après 20min", color=0xE1306C)
+    embed = discord.Embed(title="🎬 PACK REELS 8+1 - RAMANE OFM", description="Clique pour générer ton pack 8 Reels + 1 Story dans ce même salon\n\n⏰ Auto-delete 20min - Descriptions qui percent incluses", color=0xE1306C)
     await ctx.send(embed=embed, view=PackGenerateView())
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def manager(ctx, member: discord.Member): await add_grade_logic(ctx, member, "Manager")
@@ -356,8 +339,7 @@ if __name__ == "__main__":
     print("✅ Flask lancé")
     if not TOKEN:
         print("❌ DISCORD_TOKEN MANQUANT!")
-        while True:
-            time.sleep(60)
+        while True: time.sleep(60)
     while True:
         try:
             print(f"🚀 Lancement {NOM_AGENCE}...")
