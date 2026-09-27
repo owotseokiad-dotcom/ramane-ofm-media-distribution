@@ -32,7 +32,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 solde_cache = 0
 dernier_check = 0
 
-# ================== 5SIM (TON BUSINESS - INTACT) ==================
 async def get_solde_5sim():
     global solde_cache, dernier_check
     if time.time() - dernier_check < 120 and solde_cache!= 0:
@@ -85,7 +84,7 @@ class StockView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         solde = await get_solde_5sim()
         if solde == -1: await interaction.followup.send(f"❌ Erreur 5SIM", ephemeral=True)
-        else: await interaction.followup.send(f"✅ Solde 5SIM: **{solde}$** | Bénef 110F", ephemeral=True)
+        else: await interaction.followup.send(f"✅ Solde 5SIM: **{solde}$**", ephemeral=True)
     @discord.ui.button(label="📚 Comment recharger 5SIM?", style=discord.ButtonStyle.secondary)
     async def tuto(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
@@ -117,7 +116,6 @@ class ValidationView(discord.ui.View):
     @discord.ui.button(label="❌ Refusé", style=discord.ButtonStyle.danger)
     async def refuse(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(f"❌ <@{interaction.user.id}> a refusé <@{self.client_id}>", ephemeral=False)
-
     async def lancer_achat_infini(self, interaction):
         channel = interaction.channel
         solde = await get_solde_5sim()
@@ -157,7 +155,6 @@ class ValidationView(discord.ui.View):
             except Exception as e:
                 await channel.send(f"Erreur {e}", delete_after=120); await asyncio.sleep(10); continue
 
-# ================== GRADES (TON BUSINESS - INTACT) ==================
 BOSS_PRIVATE_NAME = "mon-stock-5sim"
 GRADE_COLORS = {"Manager": 0x3498db, "Team Leader": 0x2ecc71, "VA Pro": 0x9b59b6, "VA DÉBUTANT": 0xe91e63, "BOSS": 0xe74c3c}
 
@@ -189,44 +186,18 @@ async def add_grade_logic(ctx, member: discord.Member, keyword: str):
         try: role = await guild.create_role(name=keyword, color=discord.Color(GRADE_COLORS.get(keyword, 0x3498db)))
         except: await ctx.send(f"❌ Rôle {keyword} introuvable"); return
     try:
-        col = 0x3498db
-        if "va débutant" in role.name.lower() or "va debutant" in role.name.lower(): col = 0xe91e63
-        elif "va pro" in role.name.lower(): col = 0x9b59b6
-        elif "team leader" in role.name.lower(): col = 0x2ecc71
-        elif "manager" in role.name.lower(): col = 0x3498db
-        elif "boss" in role.name.lower(): col = 0xe74c3c
-        await role.edit(color=discord.Color(col))
-    except: pass
-    try:
         if guild.me.top_role.position <= role.position: await role.edit(position=guild.me.top_role.position - 1)
     except: pass
     if guild.me.top_role.position <= role.position:
         await ctx.send(f"❌ Monte mon rôle en haut BOSS"); return
     await member.add_roles(role)
-    if "manager" in keyword.lower() or "team leader" in keyword.lower():
-        try:
-            base_name = member.display_name
-            for g in ["Manager", "Team Leader", "VA", "PRO", "BOSS", "🔰", "📚", "📖"]:
-                base_name = base_name.replace(g, "")
-            base_name = re.sub(r'[0-9]+', '', base_name).strip(" |[]-_@").strip()
-            base_name = re.sub(r'\s+', ' ', base_name)
-            if not base_name: base_name = re.sub(r'[0-9]+', '', member.name).strip()
-            new_nick = f"{keyword.replace('🔰','').replace('📚','').strip()} {base_name}"
-            if len(new_nick) > 32: new_nick = new_nick[:32]
-            await member.edit(nick=new_nick)
-        except: pass
     await ctx.send(f"✅ {member.mention} est maintenant **{role.name}** BOSS")
 
-# ================== PACK REELS - V9 ==================
 DRIVE_REGEX = r"https://drive\.google\.com/drive/folders/[a-zA-Z0-9-_]+[^\s]*"
-
 def find_channel(guild, keywords):
     for ch in guild.text_channels:
-        name = ch.name.lower()
-        if any(k in name for k in keywords):
-            return ch
+        if any(k in ch.name.lower() for k in keywords): return ch
     return None
-
 async def get_all_drive_links(guild):
     chan = find_channel(guild, ["drive-réels", "drive-reels", "drive"])
     if not chan: return []
@@ -237,25 +208,17 @@ async def get_all_drive_links(guild):
             clean = f.split("?")[0]
             name_match = re.search(r"REELS\s+([A-Z0-9_]+)", msg.content.upper())
             model_name = name_match.group(1) if name_match else "MODEL"
-            links.append({"url": clean, "name": model_name, "raw": msg.content})
+            links.append({"url": clean, "name": model_name})
     uniq = {}
     for l in links: uniq[l["url"]] = l
     return list(uniq.values())
-
 async def get_all_descriptions(guild):
     chan = find_channel(guild, ["description"])
     if not chan: return []
     descs = []
     async for msg in chan.history(limit=500):
-        if len(msg.content) > 10:
-            descs.append(msg.content)
+        if len(msg.content) > 10: descs.append(msg.content)
     return descs
-
-async def get_story_fallback(guild):
-    chan = find_channel(guild, ["photos-story-cta", "story-cta", "photos-story"])
-    if not chan: return None
-    msgs = [m async for m in chan.history(limit=200) if m.attachments or "http" in m.content]
-    return random.choice(msgs) if msgs else None
 
 class FinishPackView(discord.ui.View):
     def __init__(self, thread_id):
@@ -285,10 +248,9 @@ class PackGenerateView(discord.ui.View):
         chosen = random.choice(drive_links)
         descs = await get_all_descriptions(guild)
         if len(descs) < 8:
-            await interaction.followup.send(f"⚠️ Pas assez de descriptions dans #description (trouvé {len(descs)}), il en faut 8 min BOSS", ephemeral=True)
+            await interaction.followup.send(f"⚠️ Pas assez de descriptions (trouvé {len(descs)}), il en faut 8 min BOSS", ephemeral=True)
             return
         selected_descs = random.sample(descs, 8)
-        story_fallback = await get_story_fallback(guild)
         packs_chan = find_channel(guild, ["packs-reels", "pack-reels", "packs"])
         if not packs_chan: packs_chan = interaction.channel
         model_name = chosen["name"]
@@ -297,19 +259,17 @@ class PackGenerateView(discord.ui.View):
             thread = await packs_chan.create_thread(name=thread_name, type=discord.ChannelType.private_thread, auto_archive_duration=60)
         except:
             thread = await packs_chan.create_thread(name=thread_name, auto_archive_duration=60)
-        try:
-            await thread.add_user(interaction.user)
+        try: await thread.add_user(interaction.user)
         except: pass
-        embed = discord.Embed(title=f"🎬 PACK REEL - {model_name} - 8 REELS + 1 STORY", description=f"**BOSS {NOM_AGENCE} - PACK OFFICIEL**\n\n**Modèle:** {model_name}\n**Drive:** {chosen['url']}\n**Généré pour:** {interaction.user.mention}\n\n⏰ Auto-delete dans **20 minutes**", color=0xE1306C)
+        embed = discord.Embed(title=f"🎬 PACK REEL - {model_name} - 8 REELS + 1 STORY", description=f"**BOSS {NOM_AGENCE}**\n\n**Modèle:** {model_name}\n**Drive:** {chosen['url']}\n\n⏰ Auto-delete dans **20 minutes**", color=0xE1306C)
         pack_text = f"**🔥 PACK REEL - {model_name}** - {chosen['url']}\n\n"
         for i, d in enumerate(selected_descs, 1):
-            pack_text += f"**🎬 REEL {i} + DESCRIPTION {i}:**\n{d[:800]}\n\n"
-        pack_text += f"\n**📸 STORY CTA MÊME VISAGE {model_name} :**\n→ Va dans le Drive -> dossier PHOTOS/STORY et prend 1 story qui va avec\n\n⏰ **Ce pack s'auto-supprime dans 20 min BOSS**"
+            pack_text += f"**REEL {i}:**\n{d[:800]}\n\n"
         view_finish = FinishPackView(thread.id)
         await thread.send(embed=embed, view=view_finish)
         await thread.send(content=pack_text[:1900])
         if len(pack_text) > 1900: await thread.send(content=pack_text[1900:3800])
-        await interaction.followup.send(f"✅ Ton pack **{model_name}** est prêt dans {thread.mention} BOSS - 20 min!", ephemeral=True)
+        await interaction.followup.send(f"✅ Ton pack **{model_name}** est prêt dans {thread.mention} BOSS!", ephemeral=True)
         await asyncio.sleep(1200)
         try: await thread.delete()
         except: pass
@@ -346,13 +306,9 @@ async def on_message(message):
 
 @bot.command()
 async def ping(ctx): await ctx.send(f"Pong! {NOM_AGENCE} ✅")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def setupbusiness(ctx):
-    guild = ctx.guild
-    await ctx.send(f"✅ Setup business lancé BOSS - {NOM_AGENCE}... (anciennes commandes intactes)")
-
+async def setupbusiness(ctx): await ctx.send(f"✅ Setup business OK BOSS - {NOM_AGENCE}")
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def manager(ctx, member: discord.Member): await add_grade_logic(ctx, member, "Manager")
@@ -378,9 +334,7 @@ async def boss(ctx, member: discord.Member): await add_grade_logic(ctx, member, 
 @commands.has_permissions(administrator=True)
 async def removegrade(ctx, member: discord.Member, *, grade: str):
     role = get_real_role(ctx.guild, grade)
-    if role:
-        await member.remove_roles(role)
-        await ctx.send(f"✅ {grade} retiré à {member.mention}")
+    if role: await member.remove_roles(role); await ctx.send(f"✅ {grade} retiré à {member.mention}")
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def fixcolors(ctx): await auto_fix_colors(); await ctx.send("✅ Couleurs fixées")
@@ -388,8 +342,19 @@ async def fixcolors(ctx): await auto_fix_colors(); await ctx.send("✅ Couleurs 
 @commands.has_permissions(administrator=True)
 async def clean(ctx, amount: int = 10): await ctx.channel.purge(limit=amount); await ctx.send(f"✅ {amount} messages supprimés", delete_after=3)
 
-# ================== FIX FINAL ANTI-EXITED EARLY - NE TOUCHE PAS LE RESTE ==================
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     print("✅ Flask lancé")
-    i
+    if not TOKEN:
+        print("❌ DISCORD_TOKEN MANQUANT!")
+        while True:
+            time.sleep(60)
+    while True:
+        try:
+            print(f"🚀 Lancement {NOM_AGENCE}...")
+            bot.run(TOKEN)
+        except Exception as e:
+            print(f"❌ ERREUR BOT: {e}")
+            traceback.print_exc()
+            print("⏳ Redémarrage dans 10s...")
+            time.sleep(10)
