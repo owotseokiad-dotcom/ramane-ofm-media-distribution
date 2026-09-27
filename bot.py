@@ -81,7 +81,6 @@ class GenerateView(discord.ui.View):
         super().__init__(timeout=None)
         self.service_type = service_type
         self.children[0].custom_id = f"gen_{service_type}"
-
     @discord.ui.button(label="🎲 Générer un numéro - 200F", style=discord.ButtonStyle.success)
     async def generate(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
@@ -97,7 +96,6 @@ class StockView(discord.ui.View):
         super().__init__(timeout=None)
         self.children[0].custom_id = "stock_solde_final"
         self.children[1].custom_id = "stock_tuto_final"
-
     @discord.ui.button(label="💰 Voir mon solde 5SIM", style=discord.ButtonStyle.primary)
     async def solde(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
@@ -106,7 +104,6 @@ class StockView(discord.ui.View):
             await interaction.followup.send(f"❌ Erreur 5SIM, vérifie FIVESIM_TOKEN sur Render", ephemeral=True)
         else:
             await interaction.followup.send(f"✅ Solde 5SIM: **{solde}$** | 1 num = ~0.15$ | Bénef 110F", ephemeral=True)
-
     @discord.ui.button(label="📚 Comment recharger 5SIM?", style=discord.ButtonStyle.secondary)
     async def tuto(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
@@ -121,16 +118,19 @@ class ValidationView(discord.ui.View):
         self.children[0].custom_id = f"val_momo_{client_id}"
         self.children[1].custom_id = f"val_crypto_{client_id}"
         self.children[2].custom_id = f"val_refuse_{client_id}"
-
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.guild_permissions.administrator:
             return True
         boss_role = discord.utils.get(interaction.guild.roles, name="BOSS")
+        if not boss_role:
+            for r in interaction.guild.roles:
+                if "boss" in r.name.lower():
+                    boss_role = r
+                    break
         if boss_role and boss_role in interaction.user.roles:
             return True
         await interaction.response.send_message(f"❌ <@{interaction.user.id}> Seul le BOSS peut valider.", ephemeral=True)
         return False
-
     @discord.ui.button(label="✅ Reçu MoMo", style=discord.ButtonStyle.success)
     async def momo(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
@@ -142,7 +142,6 @@ class ValidationView(discord.ui.View):
     @discord.ui.button(label="❌ Refusé", style=discord.ButtonStyle.danger)
     async def refuse(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(f"❌ <@{interaction.user.id}> a refusé le paiement de <@{self.client_id}>", ephemeral=False)
-
     async def lancer_achat_infini(self, interaction):
         channel = interaction.channel
         solde = await get_solde_5sim()
@@ -181,13 +180,107 @@ class ValidationView(discord.ui.View):
             except Exception as e:
                 await channel.send(f"Erreur pour <@{self.client_id}>: {e} - <@{interaction.user.id}>"); await asyncio.sleep(10); continue
 
+# --- GRADES + AUTO FIX COULEURS + NOUVEAU VENU BOSS ---
+BOSS_PRIVATE_NAME = "mon-stock-5sim"
+GRADE_COLORS = {"Manager": 0x3498db, "Team Leader": 0x2ecc71, "VA Pro": 0x9b59b6, "VA DÉBUTANT": 0xe91e63, "BOSS": 0xe74c3c}
+
+def get_real_role(guild, keyword):
+    keyword = keyword.lower()
+    for r in guild.roles:
+        if keyword in r.name.lower() and ("🔰" in r.name or "📚" in r.name or "📖" in r.name):
+            return r
+    for r in guild.roles:
+        if keyword in r.name.lower():
+            return r
+    return None
+
+async def auto_fix_colors():
+    for guild in bot.guilds:
+        for role in guild.roles:
+            low = role.name.lower()
+            try:
+                if "va débutant" in low or "va debutant" in low:
+                    await role.edit(color=discord.Color(0xe91e63))
+                elif "va pro" in low:
+                    await role.edit(color=discord.Color(0x9b59b6))
+                elif "team leader" in low:
+                    await role.edit(color=discord.Color(0x2ecc71))
+                elif "manager" in low:
+                    await role.edit(color=discord.Color(0x3498db))
+                elif "boss" in low:
+                    await role.edit(color=discord.Color(0xe74c3c))
+            except: pass
+
+async def add_grade_logic(ctx, member: discord.Member, keyword: str):
+    guild = ctx.guild
+    role = get_real_role(guild, keyword)
+    if not role:
+        role = discord.utils.get(guild.roles, name=keyword)
+    if not role:
+        # crée si existe pas
+        try:
+            role = await guild.create_role(name=keyword, color=discord.Color(GRADE_COLORS.get(keyword, 0x3498db)))
+        except:
+            await ctx.send(f"❌ Rôle {keyword} introuvable BOSS")
+            return
+    # force couleur
+    try:
+        col = GRADE_COLORS.get(keyword, GRADE_COLORS.get(role.name.replace("🔰","").replace("📚","").strip(), 0x3498db))
+        if "va débutant" in role.name.lower() or "va debutant" in role.name.lower(): col = 0xe91e63
+        if "va pro" in role.name.lower(): col = 0x9b59b6
+        if "team leader" in role.name.lower(): col = 0x2ecc71
+        if "manager" in role.name.lower(): col = 0x3498db
+        if "boss" in role.name.lower(): col = 0xe74c3c
+        await role.edit(color=discord.Color(col))
+    except: pass
+    try:
+        if guild.me.top_role.position <= role.position:
+            await role.edit(position=guild.me.top_role.position - 1)
+    except: pass
+    if guild.me.top_role.position <= role.position:
+        await ctx.send(f"❌ BOSS monte le rôle **{guild.me.top_role.name}** tout en haut dans Paramètres > Rôles.")
+        return
+    await member.add_roles(role)
+    # PSEUDO UNIQUEMENT POUR MANAGER / TEAM LEADER BOSS
+    if "manager" in keyword.lower() or "team leader" in keyword.lower():
+        try:
+            base_name = member.display_name
+            for g in ["Manager", "Team Leader", "VA", "PRO", "BOSS", "🔰", "📚", "📖"]:
+                base_name = base_name.replace(g, "")
+            base_name = re.sub(r'[0-9]+', '', base_name)
+            base_name = base_name.strip(" |[]-_@").strip()
+            base_name = re.sub(r'\s+', ' ', base_name)
+            if not base_name:
+                base_name = re.sub(r'[0-9]+', '', member.name).strip()
+            clean_grade = keyword.replace("🔰","").replace("📚","").strip()
+            new_nick = f"{clean_grade} {base_name}"
+            if len(new_nick) > 32: new_nick = new_nick[:32]
+            await member.edit(nick=new_nick)
+        except Exception as e:
+            print(f"Erreur pseudo: {e}")
+    await ctx.send(f"✅ {member.mention} est maintenant **{role.name}** BOSS")
+
 @bot.event
 async def on_ready():
     print(f"Connecté {bot.user}")
     bot.add_view(GenerateView("google"))
     bot.add_view(GenerateView("instagram"))
     bot.add_view(StockView())
+    await auto_fix_colors()
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="MEDIA DISTRIBUTION"))
+
+@bot.event
+async def on_member_join(member):
+    guild = member.guild
+    role = get_real_role(guild, "VA DÉBUTANT")
+    if not role:
+        role = get_real_role(guild, "VA DEBUTANT")
+    if role:
+        try:
+            await member.add_roles(role)
+            print(f"Nouveau {member.name} -> VA DÉBUTANT auto BOSS")
+        except Exception as e:
+            print(f"Erreur auto role nouveau: {e}")
 
 @bot.event
 async def on_message(message):
@@ -227,55 +320,6 @@ async def setupbusiness(ctx):
     await insta.send(embed=embed_insta, view=GenerateView("instagram"))
     await ctx.send("✅ C'est fait BOSS. Tout arrangé nikel. Teste 🎲 maintenant.")
 
-# --- GRADES FIX 403 ---
-BOSS_PRIVATE_NAME = "mon-stock-5sim"
-GRADE_COLORS = {"Manager": 0x3498db, "Team Leader": 0xf1c40f, "VA": 0x2ecc71, "PRO": 0x9b59b6}
-
-async def add_grade_logic(ctx, member: discord.Member, grade_name: str):
-    guild = ctx.guild
-    role = discord.utils.get(guild.roles, name=grade_name)
-    if not role:
-        role = await guild.create_role(name=grade_name, color=discord.Color(GRADE_COLORS[grade_name]))
-    try:
-        if guild.me.top_role.position <= role.position:
-            await role.edit(position=guild.me.top_role.position - 1)
-    except: pass
-    if guild.me.top_role.position <= role.position:
-        await ctx.send(f"❌ BOSS monte le rôle **{guild.me.top_role.name}** tout en haut dans Paramètres > Rôles. Il est sous {grade_name} donc je peux pas le donner.")
-        return
-    await member.add_roles(role)
-
-    # --- FIX PSEUDO GRADE SANS CHIFFRE BOSS ---
-    try:
-        base_name = member.display_name
-        for g in ["Manager", "Team Leader", "VA", "PRO", "BOSS"]:
-            base_name = base_name.replace(g, "")
-        base_name = re.sub(r'[0-9]+', '', base_name)
-        base_name = base_name.strip(" |[]-_@").strip()
-        base_name = re.sub(r'\s+', ' ', base_name)
-        if not base_name:
-            base_name = re.sub(r'[0-9]+', '', member.name).strip()
-        new_nick = f"{grade_name} {base_name}"
-        if len(new_nick) > 32:
-            new_nick = new_nick[:32]
-        await member.edit(nick=new_nick)
-    except Exception as e:
-        print(f"Erreur pseudo: {e}")
-
-    if grade_name in ["Manager", "Team Leader"]:
-        count=0
-        for channel in guild.channels:
-            if BOSS_PRIVATE_NAME in channel.name.lower(): continue
-            if isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
-                if channel.overwrites_for(guild.default_role).view_channel == False:
-                    try:
-                        await channel.set_permissions(role, view_channel=True, send_messages=True, read_message_history=True, connect=True)
-                        count+=1
-                    except: pass
-        await ctx.send(f"✅ {member.mention} est maintenant **{grade_name}** + pseudo: **{member.display_name}** + {count} salons BOSS")
-    else:
-        await ctx.send(f"✅ {member.mention} est maintenant **{grade_name}** + pseudo: **{member.display_name}** BOSS")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def manager(ctx, member: discord.Member):
@@ -289,22 +333,45 @@ async def teamleader(ctx, member: discord.Member):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def va(ctx, member: discord.Member):
-    await add_grade_logic(ctx, member, "VA")
+    await add_grade_logic(ctx, member, "VA DÉBUTANT")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def pro(ctx, member: discord.Member):
-    await add_grade_logic(ctx, member, "PRO")
+    await add_grade_logic(ctx, member, "VA Pro")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def vapro(ctx, member: discord.Member):
+    await add_grade_logic(ctx, member, "VA Pro")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def vadebutant(ctx, member: discord.Member):
+    await add_grade_logic(ctx, member, "VA DÉBUTANT")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def boss(ctx, member: discord.Member):
+    await add_grade_logic(ctx, member, "BOSS")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def removegrade(ctx, member: discord.Member, *, grade_name: str):
-    role = discord.utils.get(ctx.guild.roles, name=grade_name)
+    role = get_real_role(ctx.guild, grade_name)
+    if not role:
+        role = discord.utils.get(ctx.guild.roles, name=grade_name)
     if role and role in member.roles:
         await member.remove_roles(role)
-        await ctx.send(f"✅ Grade {grade_name} retiré à {member.mention} BOSS")
+        await ctx.send(f"✅ Grade {role.name} retiré à {member.mention} BOSS")
     else:
         await ctx.send(f"❌ {member.mention} n'a pas {grade_name}")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def fixcolors(ctx):
+    await auto_fix_colors()
+    await ctx.send("✅ Couleurs fixées BOSS 🔴🔵🟢🟣🩷 - Le BOSS n'oublie personne")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
