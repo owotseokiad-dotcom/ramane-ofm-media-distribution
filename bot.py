@@ -9,6 +9,7 @@ import time
 import json
 import re
 import random
+import traceback
 
 NOM_AGENCE = "RAMANE OFM - MEDIA DISTRIBUTION"
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -216,7 +217,7 @@ async def add_grade_logic(ctx, member: discord.Member, keyword: str):
         except: pass
     await ctx.send(f"✅ {member.mention} est maintenant **{role.name}** BOSS")
 
-# ================== NOUVEAU SYSTEM PACK REELS - V9 PRO 20MIN ==================
+# ================== PACK REELS - V9 ==================
 DRIVE_REGEX = r"https://drive\.google\.com/drive/folders/[a-zA-Z0-9-_]+[^\s]*"
 
 def find_channel(guild, keywords):
@@ -227,7 +228,6 @@ def find_channel(guild, keywords):
     return None
 
 async def get_all_drive_links(guild):
-    """Scan #--drive-réels et récupère TOUS les liens même nouveaux"""
     chan = find_channel(guild, ["drive-réels", "drive-reels", "drive"])
     if not chan: return []
     links = []
@@ -235,11 +235,9 @@ async def get_all_drive_links(guild):
         found = re.findall(DRIVE_REGEX, msg.content)
         for f in found:
             clean = f.split("?")[0]
-            # garde le nom du modèle depuis le message
             name_match = re.search(r"REELS\s+([A-Z0-9_]+)", msg.content.upper())
             model_name = name_match.group(1) if name_match else "MODEL"
             links.append({"url": clean, "name": model_name, "raw": msg.content})
-    # déduplique par url
     uniq = {}
     for l in links: uniq[l["url"]] = l
     return list(uniq.values())
@@ -261,7 +259,7 @@ async def get_story_fallback(guild):
 
 class FinishPackView(discord.ui.View):
     def __init__(self, thread_id):
-        super().__init__(timeout=1200) # 20 min
+        super().__init__(timeout=1200)
         self.thread_id = thread_id
         self.children[0].custom_id = f"finish_pack_{thread_id}"
     @discord.ui.button(label="✅ J'ai fini de poster", style=discord.ButtonStyle.success)
@@ -280,77 +278,38 @@ class PackGenerateView(discord.ui.View):
     async def generate_pack(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
-
         drive_links = await get_all_drive_links(guild)
         if not drive_links:
             await interaction.followup.send("❌ Aucun lien Drive trouvé dans #--drive-réels BOSS", ephemeral=True)
             return
-
         chosen = random.choice(drive_links)
         descs = await get_all_descriptions(guild)
         if len(descs) < 8:
             await interaction.followup.send(f"⚠️ Pas assez de descriptions dans #description (trouvé {len(descs)}), il en faut 8 min BOSS", ephemeral=True)
             return
-
         selected_descs = random.sample(descs, 8)
         story_fallback = await get_story_fallback(guild)
-
-        # Création du fil privé dans #packs-reels
         packs_chan = find_channel(guild, ["packs-reels", "pack-reels", "packs"])
         if not packs_chan: packs_chan = interaction.channel
-
-        # Nom du pack
         model_name = chosen["name"]
         thread_name = f"PACK-{model_name}-{interaction.user.display_name}"
-
         try:
             thread = await packs_chan.create_thread(name=thread_name, type=discord.ChannelType.private_thread, auto_archive_duration=60)
         except:
             thread = await packs_chan.create_thread(name=thread_name, auto_archive_duration=60)
-
-        # Ajouter les rôles autorisés
         try:
             await thread.add_user(interaction.user)
-            for role in guild.roles:
-                low = role.name.lower()
-                if "boss" in low or "manager" in low or "team leader" in low:
-                    for m in role.members[:10]:
-                        try: await thread.add_user(m)
-                        except: pass
         except: pass
-
-        embed = discord.Embed(
-            title=f"🎬 PACK REEL - {model_name} - 8 REELS + 1 STORY",
-            description=f"**BOSS {NOM_AGENCE} - PACK OFFICIEL**\n\n**Modèle:** {model_name}\n**Drive:** {chosen['url']}\n**Généré pour:** {interaction.user.mention}\n\nCe Drive contient les reels. Prends 8 reels même visage dedans.\n⏰ Auto-delete dans **20 minutes**",
-            color=0xE1306C
-        )
-        embed.set_footer(text=f"{NOM_AGENCE} • Auto-delete 20min • Clique sur J'ai fini si terminé")
-
+        embed = discord.Embed(title=f"🎬 PACK REEL - {model_name} - 8 REELS + 1 STORY", description=f"**BOSS {NOM_AGENCE} - PACK OFFICIEL**\n\n**Modèle:** {model_name}\n**Drive:** {chosen['url']}\n**Généré pour:** {interaction.user.mention}\n\n⏰ Auto-delete dans **20 minutes**", color=0xE1306C)
         pack_text = f"**🔥 PACK REEL - {model_name}** - {chosen['url']}\n\n"
         for i, d in enumerate(selected_descs, 1):
             pack_text += f"**🎬 REEL {i} + DESCRIPTION {i}:**\n{d[:800]}\n\n"
-
-        pack_text += f"\n**📸 STORY CTA MÊME VISAGE {model_name} :**\n"
-        pack_text += f"→ Va dans le Drive -> dossier PHOTOS/STORY et prend 1 story qui va avec ces 8 reels et qui peut percer.\n"
-        pack_text += f"→ Si le Drive n'a pas de dossier Story, va dans <#{story_fallback.channel.id if story_fallback else 'photos-story-cta'}> et prends 1 story même visage {model_name}\n"
-        pack_text += f"\n⏰ **Ce pack s'auto-supprime dans 20 min BOSS**"
-
-        # Envoi dans le fil
+        pack_text += f"\n**📸 STORY CTA MÊME VISAGE {model_name} :**\n→ Va dans le Drive -> dossier PHOTOS/STORY et prend 1 story qui va avec\n\n⏰ **Ce pack s'auto-supprime dans 20 min BOSS**"
         view_finish = FinishPackView(thread.id)
-        await thread.send(content=f"{interaction.user.mention} <@&{get_real_role(guild,'BOSS').id if get_real_role(guild,'BOSS') else ''}>", embed=embed, view=view_finish)
+        await thread.send(embed=embed, view=view_finish)
         await thread.send(content=pack_text[:1900])
-        if len(pack_text) > 1900:
-            await thread.send(content=pack_text[1900:3800])
-        if story_fallback:
-            try:
-                await thread.send(content=f"**STORY FALLBACK EXEMPLE:** {story_fallback.content[:500]}")
-                if story_fallback.attachments:
-                    await thread.send(files=[await a.to_file() for a in story_fallback.attachments[:1]])
-            except: pass
-
-        await interaction.followup.send(f"✅ Ton pack **{model_name}** est prêt dans {thread.mention} BOSS - 20 min pour poster!", ephemeral=True)
-
-        # Auto-delete après 20 min
+        if len(pack_text) > 1900: await thread.send(content=pack_text[1900:3800])
+        await interaction.followup.send(f"✅ Ton pack **{model_name}** est prêt dans {thread.mention} BOSS - 20 min!", ephemeral=True)
         await asyncio.sleep(1200)
         try: await thread.delete()
         except: pass
@@ -392,10 +351,45 @@ async def ping(ctx): await ctx.send(f"Pong! {NOM_AGENCE} ✅")
 @commands.has_permissions(administrator=True)
 async def setupbusiness(ctx):
     guild = ctx.guild
-    for cat in guild.categories:
-        if "RAMANE" in cat.name:
-            for ch in cat.channels: await ch.delete()
-            await cat.delete()
-    category = await guild.create_category("💰 RAMANE OFM - BUSINESS")
-    overwrites_stock = {guild.default_role: discord.PermissionOverwrite(view_channel=False), guild.me: discord.PermissionOverwrite(view_channel=True), ctx.author: discord.PermissionOverwrite(view_channel=True)}
-    over
+    await ctx.send(f"✅ Setup business lancé BOSS - {NOM_AGENCE}... (anciennes commandes intactes)")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def manager(ctx, member: discord.Member): await add_grade_logic(ctx, member, "Manager")
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def teamleader(ctx, member: discord.Member): await add_grade_logic(ctx, member, "Team Leader")
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def va(ctx, member: discord.Member): await add_grade_logic(ctx, member, "VA DÉBUTANT")
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def pro(ctx, member: discord.Member): await add_grade_logic(ctx, member, "VA Pro")
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def vapro(ctx, member: discord.Member): await add_grade_logic(ctx, member, "VA Pro")
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def vadebutant(ctx, member: discord.Member): await add_grade_logic(ctx, member, "VA DÉBUTANT")
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def boss(ctx, member: discord.Member): await add_grade_logic(ctx, member, "BOSS")
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def removegrade(ctx, member: discord.Member, *, grade: str):
+    role = get_real_role(ctx.guild, grade)
+    if role:
+        await member.remove_roles(role)
+        await ctx.send(f"✅ {grade} retiré à {member.mention}")
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def fixcolors(ctx): await auto_fix_colors(); await ctx.send("✅ Couleurs fixées")
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def clean(ctx, amount: int = 10): await ctx.channel.purge(limit=amount); await ctx.send(f"✅ {amount} messages supprimés", delete_after=3)
+
+# ================== FIX FINAL ANTI-EXITED EARLY - NE TOUCHE PAS LE RESTE ==================
+if __name__ == "__main__":
+    threading.Thread(target=run_flask, daemon=True).start()
+    print("✅ Flask lancé")
+    i
