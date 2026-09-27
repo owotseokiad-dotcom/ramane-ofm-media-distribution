@@ -24,22 +24,23 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- VUES CORRIGÉES - ANTI BUG "PAS REPONDU" - JE TOUCHE PAS AUX COMMANDES ---
+# --- VUES CORRIGÉES - ANTI BUG "PAS REPONDU" ---
 class GenerateView(discord.ui.View):
     def __init__(self, service_type):
         super().__init__(timeout=None)
         self.service_type = service_type
-        # FIX: custom_id unique obligatoire
         self.children[0].custom_id = f"gen_{service_type}"
 
     @discord.ui.button(label="🎲 Générer un numéro - 200F", style=discord.ButtonStyle.success)
     async def generate(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # FIX 1 - defer direct, ça évite "pas répondu à temps" quand Render se réveille
+        await interaction.response.defer(ephemeral=True)
         embed = discord.Embed(
             title=f"💳 PAIEMENT 200F - {NOM_AGENCE}",
             description=f"**Service:** {self.service_type.upper()}\n\n**1. MoMo:** `{MOMO_NUM}`\n**2. USDT BEP20:** `{CRYPTO_ADDR}`\n\nPaye et envoie capture ICI dans ce salon.",
             color=0x00ff00
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 class StockView(discord.ui.View):
     def __init__(self):
@@ -62,8 +63,10 @@ class StockView(discord.ui.View):
 
     @discord.ui.button(label="📚 Comment recharger 5SIM?", style=discord.ButtonStyle.secondary)
     async def tuto(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # FIX 1 bis
+        await interaction.response.defer(ephemeral=True)
         embed = discord.Embed(title="📚 COMMENT PAYER TES NUMÉROS - BOSS", description="**1.** Va sur 5sim.net\n**2.** Recharge avec Crypto (USDT) min 2$\n**3.** Tu n'as PAS besoin de stock BOSS\nLe bot achète tout seul quand tu valides un client. Boucle infinie jusqu'à livraison du code.", color=0x2b2d31)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 class ValidationView(discord.ui.View):
     def __init__(self, client_id, service_type):
@@ -119,6 +122,10 @@ class ValidationView(discord.ui.View):
 @bot.event
 async def on_ready():
     print(f"Connecté {bot.user}")
+    # FIX 2 - Recharger les boutons au démarrage pour qu'ils ne meurent jamais
+    bot.add_view(GenerateView("google"))
+    bot.add_view(GenerateView("instagram"))
+    bot.add_view(StockView())
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="MEDIA DISTRIBUTION"))
 
 @bot.event
@@ -158,7 +165,7 @@ async def setupbusiness(ctx):
     await insta.send(embed=embed_insta, view=GenerateView("instagram"))
     await ctx.send("✅ C'est fait BOSS. Tout arrangé nikel. Teste 🎲 maintenant.")
 
-# --- AJOUT GRADES - JE TOUCHE A RIEN D'AUTRE BOSS ---
+# --- AJOUT GRADES - FIX 403 ---
 BOSS_PRIVATE_NAME = "mon-stock-5sim"
 GRADE_COLORS = {
     "Manager": 0x3498db,
@@ -169,25 +176,35 @@ GRADE_COLORS = {
 
 async def add_grade_logic(ctx, member: discord.Member, grade_name: str):
     guild = ctx.guild
+    # FIX ROLE - Verifie que le bot est au dessus
     role = discord.utils.get(guild.roles, name=grade_name)
     if not role:
         role = await guild.create_role(name=grade_name, color=discord.Color(GRADE_COLORS[grade_name]), reason=grade_name)
+        try:
+            # On met le nouveau role juste sous le bot
+            await role.edit(position=guild.me.top_role.position - 1)
+        except: pass
+
+    if guild.me.top_role.position <= role.position:
+        await ctx.send(f"❌ BOSS monte le rôle **{guild.me.top_role.name}** tout en haut dans Paramètres > Rôles. Il est actuellement sous {grade_name} donc je ne peux pas le donner.")
+        return
 
     await member.add_roles(role)
 
-    # Manager et Team Leader => accès à tous les salons privés membres sauf ton stock
     if grade_name in ["Manager", "Team Leader"]:
+        count=0
         for channel in guild.channels:
             if BOSS_PRIVATE_NAME in channel.name.lower():
                 continue
             if isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
-                # Si salon privé (everyone ne voit pas)
                 if channel.overwrites_for(guild.default_role).view_channel == False:
                     try:
                         await channel.set_permissions(role, view_channel=True, send_messages=True, read_message_history=True, connect=True)
+                        count+=1
                     except: pass
-
-    await ctx.send(f"✅ {member.mention} est maintenant **{grade_name}** BOSS")
+        await ctx.send(f"✅ {member.mention} est maintenant **{grade_name}** + accès à **{count} salons privés** BOSS")
+    else:
+        await ctx.send(f"✅ {member.mention} est maintenant **{grade_name}** BOSS")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -218,6 +235,11 @@ async def removegrade(ctx, member: discord.Member, *, grade_name: str):
         await ctx.send(f"✅ Grade {grade_name} retiré à {member.mention} BOSS")
     else:
         await ctx.send(f"❌ {member.mention} n'a pas {grade_name}")
+
+@bot.event
+async def on_command_error(ctx, error):
+    print(f"ERREUR: {error}")
+    await ctx.send(f"❌ Erreur: {error}")
 
 if __name__ == "__main__":
     threading.Thread(target=run_flask).start()
