@@ -16,7 +16,8 @@ def home():
     return f"{NOM_AGENCE} - Bot en ligne !"
 
 def run_flask():
-    app.run(host='0.0.0.0', port=10000)
+    port = int(os.environ.get("PORT", 10000))  # <-- C'EST CE QUI MANQUAIT BOSS
+    app.run(host='0.0.0.0', port=port)
 
 # --- BOT DISCORD ---
 intents = discord.Intents.default()
