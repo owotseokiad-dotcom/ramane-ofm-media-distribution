@@ -1,6 +1,7 @@
 Flask
 discord.py
+aiohttp
 requests
 google-api-python-client
-yt-dlp
-aiohttp
+google-auth
+google-auth-httplib2
