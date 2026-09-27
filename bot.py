@@ -7,6 +7,7 @@ import asyncio
 import aiohttp
 import time
 import json
+import re
 
 NOM_AGENCE = "RAMANE OFM - MEDIA DISTRIBUTION"
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -122,7 +123,6 @@ class ValidationView(discord.ui.View):
         self.children[2].custom_id = f"val_refuse_{client_id}"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # SEUL BOSS / ADMIN PEUT CLIQUER - FIX DEMANDE
         if interaction.user.guild_permissions.administrator:
             return True
         boss_role = discord.utils.get(interaction.guild.roles, name="BOSS")
@@ -149,7 +149,6 @@ class ValidationView(discord.ui.View):
         if solde!= -1 and solde < 0.10:
             await channel.send(f"❌ **Stock vide <@{interaction.user.id}> doit recharger** - Solde 5SIM: {solde}$ - <@{self.client_id}> reviens plus tard.")
             return
-
         await channel.send(f"✅ Validé par <@{interaction.user.id}> pour <@{self.client_id}>. Achat 5SIM en cours... <@{self.client_id}> reste ici dans ce salon.")
         tentative = 1
         while True:
@@ -160,10 +159,7 @@ class ValidationView(discord.ui.View):
                     break
                 if not tel:
                     await channel.send(f"❌ Erreur 5SIM T{tentative} pour <@{self.client_id}>, retente 20s..."); await asyncio.sleep(20); tentative+=1; continue
-
-                # TOUT DANS MEME SALON + TAG CLIENT + BOSS
                 await channel.send(f"✅ **<@{self.client_id}> NUMÉRO LIVRÉ T{tentative}: `{tel}` ID:{order_id} - Attente code... Validé par <@{interaction.user.id}>**")
-
                 code=None
                 async with aiohttp.ClientSession() as session:
                     headers = {"Authorization": f"Bearer {FIVESIM_TOKEN}", "Accept": "application/json"}
@@ -217,7 +213,6 @@ async def setupbusiness(ctx):
     category = await guild.create_category("💰 RAMANE OFM - BUSINESS")
     overwrites_stock = {guild.default_role: discord.PermissionOverwrite(view_channel=False), guild.me: discord.PermissionOverwrite(view_channel=True), ctx.author: discord.PermissionOverwrite(view_channel=True)}
     overwrites_public = {guild.default_role: discord.PermissionOverwrite(view_channel=True, send_messages=False), guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True), ctx.author: discord.PermissionOverwrite(view_channel=True, send_messages=True)}
-    # FIX MEMBRES PEUVENT ENVOYER PREUVE
     overwrites_number = {guild.default_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, embed_links=True), guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True), ctx.author: discord.PermissionOverwrite(view_channel=True, send_messages=True)}
     stock = await guild.create_text_channel("🔒-mon-stock-5sim", category=category, overwrites=overwrites_stock)
     embed_stock = discord.Embed(title="🔒 TON QG PERSO - BOSS RAMANE", description=f"**Ici tu gères ton business 5SIM.**\n\n**Comment ça marche?**\nTu n'as pas besoin de stocker de numéros. Tu recharges juste ton solde sur 5sim.net.\nQuand un client paye 200F, le bot achète 1 numéro (~90F) et te reste 110F de bénef.\n\n**Tuto:** Clique en bas pour voir ton solde et comment recharger.", color=0x2b2d31)
@@ -232,7 +227,7 @@ async def setupbusiness(ctx):
     await insta.send(embed=embed_insta, view=GenerateView("instagram"))
     await ctx.send("✅ C'est fait BOSS. Tout arrangé nikel. Teste 🎲 maintenant.")
 
-# --- GRADES FIX 403 (PAS TOUCHE) ---
+# --- GRADES FIX 403 ---
 BOSS_PRIVATE_NAME = "mon-stock-5sim"
 GRADE_COLORS = {"Manager": 0x3498db, "Team Leader": 0xf1c40f, "VA": 0x2ecc71, "PRO": 0x9b59b6}
 
@@ -249,6 +244,24 @@ async def add_grade_logic(ctx, member: discord.Member, grade_name: str):
         await ctx.send(f"❌ BOSS monte le rôle **{guild.me.top_role.name}** tout en haut dans Paramètres > Rôles. Il est sous {grade_name} donc je peux pas le donner.")
         return
     await member.add_roles(role)
+
+    # --- FIX PSEUDO GRADE SANS CHIFFRE BOSS ---
+    try:
+        base_name = member.display_name
+        for g in ["Manager", "Team Leader", "VA", "PRO", "BOSS"]:
+            base_name = base_name.replace(g, "")
+        base_name = re.sub(r'[0-9]+', '', base_name)
+        base_name = base_name.strip(" |[]-_@").strip()
+        base_name = re.sub(r'\s+', ' ', base_name)
+        if not base_name:
+            base_name = re.sub(r'[0-9]+', '', member.name).strip()
+        new_nick = f"{grade_name} {base_name}"
+        if len(new_nick) > 32:
+            new_nick = new_nick[:32]
+        await member.edit(nick=new_nick)
+    except Exception as e:
+        print(f"Erreur pseudo: {e}")
+
     if grade_name in ["Manager", "Team Leader"]:
         count=0
         for channel in guild.channels:
@@ -259,9 +272,9 @@ async def add_grade_logic(ctx, member: discord.Member, grade_name: str):
                         await channel.set_permissions(role, view_channel=True, send_messages=True, read_message_history=True, connect=True)
                         count+=1
                     except: pass
-        await ctx.send(f"✅ {member.mention} est maintenant **{grade_name}** + accès à **{count} salons privés** BOSS")
+        await ctx.send(f"✅ {member.mention} est maintenant **{grade_name}** + pseudo: **{member.display_name}** + {count} salons BOSS")
     else:
-        await ctx.send(f"✅ {member.mention} est maintenant **{grade_name}** BOSS")
+        await ctx.send(f"✅ {member.mention} est maintenant **{grade_name}** + pseudo: **{member.display_name}** BOSS")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -293,7 +306,6 @@ async def removegrade(ctx, member: discord.Member, *, grade_name: str):
     else:
         await ctx.send(f"❌ {member.mention} n'a pas {grade_name}")
 
-# --- NOUVELLES COMMANDES CLEAN ---
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def clearerrors(ctx):
