@@ -286,26 +286,32 @@ class PackGenerateView(discord.ui.View):
         if len(video_files) == 0: video_files = reels_files
         video_files = video_files[:8]
         sent = []
-        embed = discord.Embed(title=f"PACK REEL - {chosen['name']}", description=f"**BOSS {NOM_AGENCE}**\nModele: {chosen['name']}\nDrive: {chosen['url']}\nVRAIES VIDEOS\nAuto-delete 20min", color=0xE1306C)
-        m = await interaction.channel.send(content=f"PACK pour {interaction.user.mention} - {chosen['name']}", embed=embed)
+        embed = discord.Embed(title=f"{chosen['name']} | PACK 8", description=f"Model: {chosen['name']}\nDelivery: Instant | Auto-delete 20min", color=0xE1306C)
+        m = await interaction.channel.send(content=f"PACK pour {interaction.user.mention} - **{chosen['name']}**", embed=embed)
         sent.append(m)
         for i, vf in enumerate(video_files):
             data = await download_drive_file(vf["id"])
             if not data: continue
             file_obj = discord.File(io.BytesIO(data), filename=vf["name"])
             desc_copiable = f"```\n{selected_descs[i][:1000]}\n```"
-            txt = f"REEL {i+1}/8 - {chosen['name']} - {vf['name']}\n{desc_copiable}"
+            txt = f"**REEL {i+1}/8 - {chosen['name']}**\n{desc_copiable}"
             mm = await interaction.channel.send(content=txt, file=file_obj)
             sent.append(mm)
+        story_channel = find_channel(guild, ["photos-story-cta", "photos-story", "story", "cta"])
         if story_folder_id:
             story_files = await list_drive_files(story_folder_id)
+            target_story_chan = story_channel if story_channel else interaction.channel
             for sf in story_files[:1]:
                 sdata = await download_drive_file(sf["id"])
                 if sdata:
                     sfile = discord.File(io.BytesIO(sdata), filename=sf["name"])
-                    ms = await interaction.channel.send(content=f"STORY 1/1 - {chosen['name']}", file=sfile)
-                    sent.append(ms)
-        await interaction.followup.send(f"Pack {chosen['name']} genere BOSS!", ephemeral=True)
+                    await target_story_chan.send(content=f"**STORY 1/1 - {chosen['name']}** pour {interaction.user.mention}", file=sfile)
+            await interaction.followup.send(f"Pack {chosen['name']} genere BOSS! 8 Reels ici + 1 Story dans {target_story_chan.mention}", ephemeral=True)
+        else:
+            if story_channel:
+                await interaction.followup.send(f"Pack {chosen['name']} genere BOSS! 8 Reels ici.\n⚠️ Ce Drive n'a pas de Story -> Va prendre 1 Story dans {story_channel.mention} pour completer ton 8+1", ephemeral=True)
+            else:
+                await interaction.followup.send(f"Pack {chosen['name']} genere BOSS! 8 Reels ici. ⚠️ Pas de Story dans ce Drive.", ephemeral=True)
         await asyncio.sleep(1200)
         for msg in sent:
             try: await msg.delete()
@@ -342,45 +348,40 @@ async def on_message(message):
 
 @bot.command()
 async def ping(ctx): await ctx.send(f"Pong! {NOM_AGENCE}")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setupbusiness(ctx): await ctx.send(f"Setup business OK BOSS - {NOM_AGENCE}")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setuppack(ctx):
-    embed = discord.Embed(title="PACK REELS 8+1 - RAMANE OFM", description="Clique pour generer ton pack 8 Reels + 1 Story dans ce meme salon\nAuto-delete 20min - VRAIES VIDEOS", color=0xE1306C)
+    embed = discord.Embed(
+        title="PACK REELS 8+1",
+        description="**RAMANE OFM - MEDIA DISTRIBUTION**\n\n▸ 8 VIRAL REELS [HD - No Watermark]\n▸ 1 STORY BONUS\n▸ 8 COPY-PASTE CAPTIONS\n\nAuto-delete 20min | Instant Delivery",
+        color=0xE1306C
+    )
+    embed.set_footer(text="Clique ci-dessous pour generer")
     await ctx.send(embed=embed, view=PackGenerateView())
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def manager(ctx, member: discord.Member): await add_grade_logic(ctx, member, "Manager")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def teamleader(ctx, member: discord.Member): await add_grade_logic(ctx, member, "Team Leader")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def va(ctx, member: discord.Member): await add_grade_logic(ctx, member, "VA DEBUTANT")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def pro(ctx, member: discord.Member): await add_grade_logic(ctx, member, "VA Pro")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def vapro(ctx, member: discord.Member): await add_grade_logic(ctx, member, "VA Pro")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def vadebutant(ctx, member: discord.Member): await add_grade_logic(ctx, member, "VA DEBUTANT")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def boss(ctx, member: discord.Member): await add_grade_logic(ctx, member, "BOSS")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def removegrade(ctx, member: discord.Member, *, grade: str):
@@ -388,27 +389,11 @@ async def removegrade(ctx, member: discord.Member, *, grade: str):
     if r:
         await member.remove_roles(r)
         await ctx.send(r.name)
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def fixcolors(ctx): await auto_fix_colors(); await ctx.send("Couleurs fixees")
-
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def clean(ctx, amount: int = 10): await ctx.channel.purge(limit=amount); await ctx.send(f"{amount} messages supprimes", delete_after=3)
-
-if __name__ == "__main__":
-    threading.Thread(target=run_flask, daemon=True).start()
-    print("Flask lance")
-    if not TOKEN:
-        print("DISCORD_TOKEN MANQUANT!")
-        while True: time.sleep(60)
-    while True:
-        try:
-            print(f"Lancement {NOM_AGENCE}...")
-            bot.run(TOKEN)
-        except Exception as e:
-            print(f"ERREUR BOT: {e}")
-            traceback.print_exc()
-            print("Redemarrage dans 10s...")
-            time.sleep(10)
+async def clean(ctx, amount: int = 10):
+    await ctx.channel.purge(limit=amount)
+    await ctx.send(f"{amount} messages supprimes", delete_after=3
