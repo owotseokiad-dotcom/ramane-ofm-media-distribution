@@ -403,4 +403,6 @@ async def boss(ctx, member: discord.Member): await add_grade_logic(ctx, member, 
 @commands.has_permissions(administrator=True)
 async def removegrade(ctx, member: discord.Member, *, grade: str):
     role = get_real_role(ctx.guild, grade)
-    if role: await member.remove_roles(role); await ctx.send(f"{grade} retir
+    if role:
+        await member.remove_roles(role)
+        await ctx.send(
