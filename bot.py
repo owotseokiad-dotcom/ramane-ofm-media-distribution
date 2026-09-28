@@ -254,14 +254,16 @@ class PackGenerateView(discord.ui.View):
             return
         chosen = random.choice(drive_links)
         descs = await get_all_descriptions(guild)
-        if len(descs) < 8:
-            await interaction.followup.send("Pas assez de descriptions (" + str(len(descs)) + "/8) BOSS", ephemeral=True)
-            return
-        selected_descs = random.sample(descs, 8)
+
         if not GOOGLE_DRIVE_API_KEY:
             await interaction.followup.send("GOOGLE_DRIVE_API_KEY manquante BOSS", ephemeral=True)
             return
+
         main_folder_id = extract_folder_id(chosen['url'])
+        if not main_folder_id:
+            await interaction.followup.send("Lien Drive invalide BOSS", ephemeral=True)
+            return
+
         root_files = await list_drive_files(main_folder_id)
         reels_folder_id = None
         story_folder_id = None
@@ -270,38 +272,56 @@ class PackGenerateView(discord.ui.View):
                 lname = f["name"].lower()
                 if "reel" in lname: reels_folder_id = f["id"]
                 if "story" in lname or "photo" in lname: story_folder_id = f["id"]
+
         target_reels_id = reels_folder_id if reels_folder_id else main_folder_id
         reels_files = await list_drive_files(target_reels_id)
         video_files = [f for f in reels_files if "video" in f.get("mimeType","") or f["name"].lower().endswith((".mp4",".mov",".mkv"))]
-        if len(video_files) == 0: video_files = reels_files
-        video_files = video_files[:8]
+        if len(video_files) == 0:
+            video_files = [f for f in reels_files if "folder" not in f.get("mimeType","")]
+
+        if len(video_files) == 0:
+            await interaction.followup.send(f"Drive {chosen['name']} vide BOSS", ephemeral=True)
+            return
+
+        # FLEXIBLE : envoie ce qu'il y a
+        a_envoyer = min(len(video_files), 8)
+        video_files = video_files[:a_envoyer]
+
+        if len(descs) >= a_envoyer:
+            selected_descs = random.sample(descs, a_envoyer)
+        elif len(descs) > 0:
+            selected_descs = (descs * a_envoyer)[:a_envoyer]
+        else:
+            selected_descs = [""] * a_envoyer
+
         sent = []
-        embed = discord.Embed(title=chosen['name'] + " | PACK 8", description="Model: " + chosen['name'] + "\nDelivery: Instant | Auto-delete 20min", color=0xE1306C)
-        m = await interaction.channel.send(content="PACK pour " + interaction.user.mention + " - **" + chosen['name'] + "**", embed=embed)
+        embed = discord.Embed(title=f"{chosen['name']} | PACK {a_envoyer}", description=f"Model: {chosen['name']}\nVideos: {a_envoyer} trouves | Auto-delete 20min", color=0xE1306C)
+        m = await interaction.channel.send(content=f"PACK pour {interaction.user.mention} - **{chosen['name']}** ({a_envoyer} Reels)", embed=embed)
         sent.append(m)
+
         for i, vf in enumerate(video_files):
             data = await download_drive_file(vf["id"])
             if not data: continue
             file_obj = discord.File(io.BytesIO(data), filename=vf["name"])
             desc_copiable = "```\n" + selected_descs[i][:1000] + "\n```"
-            txt = "**REEL " + str(i+1) + "/8 - " + chosen['name'] + "**\n" + desc_copiable
+            txt = f"**REEL {i+1}/{a_envoyer} - {chosen['name']}**\n{desc_copiable}"
             mm = await interaction.channel.send(content=txt, file=file_obj)
             sent.append(mm)
+
         story_channel = find_channel(guild, ["photos-story-cta", "photos-story", "story", "cta"])
+        target_story_chan = story_channel if story_channel else interaction.channel
+
         if story_folder_id:
             story_files = await list_drive_files(story_folder_id)
-            target_story_chan = story_channel if story_channel else interaction.channel
-            for sf in story_files[:1]:
+            if story_files:
+                sf = story_files[0]
                 sdata = await download_drive_file(sf["id"])
                 if sdata:
                     sfile = discord.File(io.BytesIO(sdata), filename=sf["name"])
-                    await target_story_chan.send(content="**STORY 1/1 - " + chosen['name'] + "** pour " + interaction.user.mention, file=sfile)
-            await interaction.followup.send("Pack " + chosen['name'] + " genere BOSS! 8 Reels ici + 1 Story dans " + target_story_chan.mention, ephemeral=True)
-        else:
-            if story_channel:
-                await interaction.followup.send("Pack " + chosen['name'] + " genere BOSS! 8 Reels ici. Ce Drive n'a pas de Story -> Va prendre 1 Story dans " + story_channel.mention, ephemeral=True)
-            else:
-                await interaction.followup.send("Pack " + chosen['name'] + " genere BOSS! 8 Reels ici. Pas de Story dans ce Drive.", ephemeral=True)
+                    await target_story_chan.send(content=f"**STORY 1/1 - {chosen['name']}** pour {interaction.user.mention}", file=sfile)
+
+        await interaction.followup.send(f"Pack {chosen['name']} genere BOSS! {a_envoyer} Reels + Story OK", ephemeral=True)
+
         await asyncio.sleep(1200)
         for msg in sent:
             try: await msg.delete()
