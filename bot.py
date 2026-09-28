@@ -36,13 +36,15 @@ dernier_check = 0
 
 def extract_folder_id(url):
     m = re.search(r"/folders/([a-zA-Z0-9-_]+)", url)
+    if not m:
+        m = re.search(r"id=([a-zA-Z0-9-_]+)", url)
     return m.group(1) if m else None
 
 async def list_drive_files(folder_id):
     if not GOOGLE_DRIVE_API_KEY or not folder_id: return []
     try:
         url = "https://www.googleapis.com/drive/v3/files"
-        params = {"q": "'" + folder_id + "' in parents and trashed=false", "key": GOOGLE_DRIVE_API_KEY, "fields": "files(id,name,mimeType)", "pageSize": 100}
+        params = {"q": f"'{folder_id}' in parents and trashed=false", "key": GOOGLE_DRIVE_API_KEY, "fields": "files(id,name,mimeType)", "pageSize": 100}
         async with aiohttp.ClientSession() as s:
             async with s.get(url, params=params, timeout=15) as r:
                 if r.status!= 200: return []
@@ -88,7 +90,7 @@ async def acheter_numero(service):
                 if r.status!= 200: return None, "STOCK_VIDE"
                 data = json.loads(text)
                 if "phone" not in data or "id" not in data: return None, "STOCK_VIDE"
-                return str(data["phone"]).replace("+",""), str(data["id"])
+                return str(data["phone"]).replace("+", ""), str(data["id"])
     except: return None, "STOCK_VIDE"
 
 class GenerateView(discord.ui.View):
@@ -221,13 +223,15 @@ async def get_all_drive_links(guild):
     chan = find_channel(guild, ["drive-reels", "drive"])
     if not chan: return []
     links = []
-    async for msg in chan.history(limit=500):
+    async for msg in chan.history(limit=1000):
         found = re.findall(DRIVE_REGEX, msg.content)
         for f in found:
-            clean = f.split("?")[0]
+            clean = f.split("?")[0].split("&")[0]
             name_match = re.search(r"REELS\s+([A-Z0-9_]+)", msg.content.upper())
-            model_name = name_match.group(1) if name_match else "MODEL"
-            links.append({"url": clean, "name": model_name})
+            if not name_match:
+                name_match = re.search(r"([A-Z0-9_]{3,})", msg.content.upper())
+            model_name = name_match.group(1) if name_match else f"MODEL-{len(links)+1}"
+            links.append({"url": clean, "name": model_name[:90]})
     uniq = {}
     for l in links: uniq[l["url"]] = l
     return list(uniq.values())
@@ -240,30 +244,48 @@ async def get_all_descriptions(guild):
         if len(msg.content) > 10: descs.append(msg.content)
     return descs
 
+# NOUVEAU SYSTEME 2 OPTIONS - NE TOUCHE PAS LE RESTE
 class PackGenerateView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.children[0].custom_id = "pack_generate_final_same_channel"
-    @discord.ui.button(label="Generer mon pack 8 Reels", style=discord.ButtonStyle.success, emoji="🎬")
-    async def generate_pack(self, interaction: discord.Interaction, button: discord.ui.Button):
+
+    @discord.ui.button(label="Pack Aleatoire", style=discord.ButtonStyle.success, emoji="🎲", custom_id="pack_auto_v3")
+    async def auto_pack(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
+        links = await get_all_drive_links(interaction.guild)
+        if not links:
+            await interaction.followup.send("Aucun lien dans #drive-reels BOSS", ephemeral=True)
+            return
+        chosen = random.choice(links)
+        await self.send_pack_for_link(interaction, chosen)
+
+    @discord.ui.button(label="Choisir un Model", style=discord.ButtonStyle.primary, emoji="📂", custom_id="pack_choose_v3")
+    async def choose_pack(self, interaction: discord.Interaction, button: discord.ui.Button):
+        links = await get_all_drive_links(interaction.guild)
+        if not links:
+            await interaction.response.send_message("Aucun lien dans #drive-reels BOSS", ephemeral=True)
+            return
+        display_links = links[:25]
+        options = [discord.SelectOption(label=l['name'][:90], value=l['url'], description=l['name'][:90]) for l in display_links]
+        select = discord.ui.Select(placeholder="Choisis ton model...", options=options)
+        async def select_callback(inter: discord.Interaction):
+            await inter.response.defer(ephemeral=True)
+            url_selected = select.values[0]
+            chosen = next((x for x in links if x['url'] == url_selected), None)
+            if chosen:
+                await self.send_pack_for_link(inter, chosen)
+        select.callback = select_callback
+        view = discord.ui.View(timeout=120)
+        view.add_item(select)
+        await interaction.response.send_message(f"📂 **{len(links)} Models dispo** - Choisis :", view=view, ephemeral=True)
+
+    async def send_pack_for_link(self, interaction, chosen):
         guild = interaction.guild
-        drive_links = await get_all_drive_links(guild)
-        if not drive_links:
-            await interaction.followup.send("Aucun lien Drive dans #--drive-reels BOSS", ephemeral=True)
-            return
-        chosen = random.choice(drive_links)
         descs = await get_all_descriptions(guild)
-
-        if not GOOGLE_DRIVE_API_KEY:
-            await interaction.followup.send("GOOGLE_DRIVE_API_KEY manquante BOSS", ephemeral=True)
-            return
-
         main_folder_id = extract_folder_id(chosen['url'])
         if not main_folder_id:
-            await interaction.followup.send("Lien Drive invalide BOSS", ephemeral=True)
+            await interaction.followup.send("Lien invalide BOSS", ephemeral=True)
             return
-
         root_files = await list_drive_files(main_folder_id)
         reels_folder_id = None
         story_folder_id = None
@@ -272,33 +294,26 @@ class PackGenerateView(discord.ui.View):
                 lname = f["name"].lower()
                 if "reel" in lname: reels_folder_id = f["id"]
                 if "story" in lname or "photo" in lname: story_folder_id = f["id"]
-
         target_reels_id = reels_folder_id if reels_folder_id else main_folder_id
         reels_files = await list_drive_files(target_reels_id)
         video_files = [f for f in reels_files if "video" in f.get("mimeType","") or f["name"].lower().endswith((".mp4",".mov",".mkv"))]
         if len(video_files) == 0:
             video_files = [f for f in reels_files if "folder" not in f.get("mimeType","")]
-
         if len(video_files) == 0:
-            await interaction.followup.send(f"Drive {chosen['name']} vide BOSS", ephemeral=True)
+            await interaction.followup.send(f"Dossier {chosen['name']} vide BOSS. Mets en 'Toute personne disposant du lien'", ephemeral=True)
             return
-
-        # FLEXIBLE : envoie ce qu'il y a
         a_envoyer = min(len(video_files), 8)
         video_files = video_files[:a_envoyer]
-
         if len(descs) >= a_envoyer:
             selected_descs = random.sample(descs, a_envoyer)
         elif len(descs) > 0:
             selected_descs = (descs * a_envoyer)[:a_envoyer]
         else:
             selected_descs = [""] * a_envoyer
-
         sent = []
         embed = discord.Embed(title=f"{chosen['name']} | PACK {a_envoyer}", description=f"Model: {chosen['name']}\nVideos: {a_envoyer} trouves | Auto-delete 20min", color=0xE1306C)
         m = await interaction.channel.send(content=f"PACK pour {interaction.user.mention} - **{chosen['name']}** ({a_envoyer} Reels)", embed=embed)
         sent.append(m)
-
         for i, vf in enumerate(video_files):
             data = await download_drive_file(vf["id"])
             if not data: continue
@@ -307,21 +322,16 @@ class PackGenerateView(discord.ui.View):
             txt = f"**REEL {i+1}/{a_envoyer} - {chosen['name']}**\n{desc_copiable}"
             mm = await interaction.channel.send(content=txt, file=file_obj)
             sent.append(mm)
-
         story_channel = find_channel(guild, ["photos-story-cta", "photos-story", "story", "cta"])
         target_story_chan = story_channel if story_channel else interaction.channel
-
         if story_folder_id:
             story_files = await list_drive_files(story_folder_id)
             if story_files:
-                sf = story_files[0]
-                sdata = await download_drive_file(sf["id"])
+                sdata = await download_drive_file(story_files[0]["id"])
                 if sdata:
-                    sfile = discord.File(io.BytesIO(sdata), filename=sf["name"])
+                    sfile = discord.File(io.BytesIO(sdata), filename=story_files[0]["name"])
                     await target_story_chan.send(content=f"**STORY 1/1 - {chosen['name']}** pour {interaction.user.mention}", file=sfile)
-
         await interaction.followup.send(f"Pack {chosen['name']} genere BOSS! {a_envoyer} Reels + Story OK", ephemeral=True)
-
         await asyncio.sleep(1200)
         for msg in sent:
             try: await msg.delete()
@@ -364,8 +374,12 @@ async def setupbusiness(ctx): await ctx.send("Setup business OK BOSS - " + NOM_A
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setuppack(ctx):
-    embed = discord.Embed(title="PACK REELS 8+1", description="**RAMANE OFM - MEDIA DISTRIBUTION**\n\n8 VIRAL REELS [HD]\n1 STORY BONUS\n8 CAPTIONS\n\nAuto-delete 20min", color=0xE1306C)
-    embed.set_footer(text="Clique ci-dessous pour generer")
+    embed = discord.Embed(
+        title="🎬 RAMANE OFM - GENERATEUR DE PACK",
+        description="**Le bot fait quoi?**\nIl prend tous les liens que le BOSS met dans #drive-reels et te livre le pack complet.\n\n**2 options :**\n🎲 **Pack Aleatoire** : Bot choisit un model au hasard\n📂 **Choisir un Model** : Tu choisis ton model (SOPHIE_01, LISA_02...)\n\n**3 Avantages :**\n1️⃣ **Rapide** : 8 Reels HD + 1 Story + Captions en 10s\n2️⃣ **Pro** : Descriptions pretes a copier-coller\n3️⃣ **Propre** : Auto-delete 20min, salon propre\n\n👇 **Clique ci-dessous**",
+        color=0xE1306C
+    )
+    embed.set_footer(text="RAMANE OFM - Tous les liens Drive sont accessibles")
     await ctx.send(embed=embed, view=PackGenerateView())
 @bot.command()
 @commands.has_permissions(administrator=True)
