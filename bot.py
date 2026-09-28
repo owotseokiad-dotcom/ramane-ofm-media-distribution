@@ -39,38 +39,31 @@ def extract_folder_id(url):
     return m.group(1) if m else None
 
 async def list_drive_files(folder_id):
-    if not GOOGLE_DRIVE_API_KEY or not folder_id:
-        return []
+    if not GOOGLE_DRIVE_API_KEY or not folder_id: return []
     try:
         url = "https://www.googleapis.com/drive/v3/files"
         params = {"q": f"'{folder_id}' in parents and trashed=false", "key": GOOGLE_DRIVE_API_KEY, "fields": "files(id,name,mimeType)", "pageSize": 100}
         async with aiohttp.ClientSession() as s:
             async with s.get(url, params=params, timeout=15) as r:
-                if r.status!= 200:
-                    return []
+                if r.status!= 200: return []
                 data = await r.json()
                 return data.get("files", [])
-    except:
-        return []
+    except: return []
 
 async def download_drive_file(file_id):
-    if not GOOGLE_DRIVE_API_KEY:
-        return None
+    if not GOOGLE_DRIVE_API_KEY: return None
     try:
         url = f"https://www.googleapis.com/drive/v3/files/{file_id}"
         params = {"alt": "media", "key": GOOGLE_DRIVE_API_KEY}
         async with aiohttp.ClientSession() as s:
             async with s.get(url, params=params, timeout=60) as r:
-                if r.status!= 200:
-                    return None
+                if r.status!= 200: return None
                 return await r.read()
-    except:
-        return None
+    except: return None
 
 async def get_solde_5sim():
     global solde_cache, dernier_check
-    if time.time() - dernier_check < 120 and solde_cache!= 0:
-        return solde_cache
+    if time.time() - dernier_check < 120 and solde_cache!= 0: return solde_cache
     try:
         headers = {"Authorization": f"Bearer {FIVESIM_TOKEN}", "Accept": "application/json"}
         async with aiohttp.ClientSession() as s:
@@ -106,7 +99,7 @@ class GenerateView(discord.ui.View):
     @discord.ui.button(label="Generer un numero - 200F", style=discord.ButtonStyle.success)
     async def generate(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        embed = discord.Embed(title=f"PAIEMENT 200F - {NOM_AGENCE}", description=f"**Service:** {self.service_type.upper()}\n\n**1. MoMo:** `{MOMO_NUM}`\n**2. USDT BEP20:** `{CRYPTO_ADDR}`\n\nPaye et envoie capture ICI dans ce salon.", color=0x00ff00)
+        embed = discord.Embed(title=f"PAIEMENT 200F - {NOM_AGENCE}", description=f"**Service:** {self.service_type.upper()}\n\n**1. MoMo:** `{MOMO_NUM}`\n**2. USDT BEP20:** `{CRYPTO_ADDR}`\n\nPaye et envoie capture ICI.", color=0x00ff00)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 class StockView(discord.ui.View):
@@ -235,7 +228,7 @@ def find_channel(guild, keywords):
     return None
 
 async def get_all_drive_links(guild):
-    chan = find_channel(guild, ["drive-reels", "drive-reels", "drive"])
+    chan = find_channel(guild, ["drive-reels", "drive"])
     if not chan: return []
     links = []
     async for msg in chan.history(limit=500):
@@ -272,11 +265,11 @@ class PackGenerateView(discord.ui.View):
         chosen = random.choice(drive_links)
         descs = await get_all_descriptions(guild)
         if len(descs) < 8:
-            await interaction.followup.send(f"Pas assez de descriptions dans #description ({len(descs)}/8) BOSS", ephemeral=True)
+            await interaction.followup.send(f"Pas assez de descriptions ({len(descs)}/8) BOSS", ephemeral=True)
             return
         selected_descs = random.sample(descs, 8)
         if not GOOGLE_DRIVE_API_KEY:
-            await interaction.followup.send("GOOGLE_DRIVE_API_KEY manquante sur Render BOSS", ephemeral=True)
+            await interaction.followup.send("GOOGLE_DRIVE_API_KEY manquante BOSS", ephemeral=True)
             return
         main_folder_id = extract_folder_id(chosen['url'])
         root_files = await list_drive_files(main_folder_id)
@@ -290,40 +283,29 @@ class PackGenerateView(discord.ui.View):
         target_reels_id = reels_folder_id if reels_folder_id else main_folder_id
         reels_files = await list_drive_files(target_reels_id)
         video_files = [f for f in reels_files if "video" in f.get("mimeType","") or f["name"].lower().endswith((".mp4",".mov",".mkv"))]
-        if len(video_files) == 0:
-            video_files = reels_files
+        if len(video_files) == 0: video_files = reels_files
         video_files = video_files[:8]
         sent = []
-        embed = discord.Embed(title=f"PACK REEL - {chosen['name']} - 8 REELS + 1 STORY", description=f"**BOSS {NOM_AGENCE}**\n\n**Modele:** {chosen['name']}\n**Drive:** {chosen['url']}\n\nVRAIES VIDEOS envoi direct\nAuto-delete dans 20 minutes - Meme salon", color=0xE1306C)
+        embed = discord.Embed(title=f"PACK REEL - {chosen['name']}", description=f"**BOSS {NOM_AGENCE}**\nModele: {chosen['name']}\nDrive: {chosen['url']}\nVRAIES VIDEOS\nAuto-delete 20min", color=0xE1306C)
         m = await interaction.channel.send(content=f"PACK pour {interaction.user.mention} - {chosen['name']}", embed=embed)
         sent.append(m)
         for i, vf in enumerate(video_files):
             data = await download_drive_file(vf["id"])
-            if not data:
-                await interaction.channel.send(f"Impossible de telecharger {vf['name']}")
-                continue
+            if not data: continue
             file_obj = discord.File(io.BytesIO(data), filename=vf["name"])
             desc_copiable = f"```\n{selected_descs[i][:1000]}\n```"
-            txt = f"REEL {i+1}/8 - {chosen['name']} - {vf['name']}\nDescription copiable (1 clic):\n{desc_copiable}"
-            try:
-                mm = await interaction.channel.send(content=txt, file=file_obj)
-                sent.append(mm)
-            except Exception as e:
-                direct_link = f"https://www.googleapis.com/drive/v3/files/{vf['id']}?alt=media&key={GOOGLE_DRIVE_API_KEY}"
-                await interaction.channel.send(f"Video {vf['name']} trop lourde, lien direct: {direct_link}\n{txt}")
+            txt = f"REEL {i+1}/8 - {chosen['name']} - {vf['name']}\n{desc_copiable}"
+            mm = await interaction.channel.send(content=txt, file=file_obj)
+            sent.append(mm)
         if story_folder_id:
             story_files = await list_drive_files(story_folder_id)
-            story_videos = [f for f in story_files if "video" in f.get("mimeType","") or "image" in f.get("mimeType","")][:1]
-            for sf in story_videos:
+            for sf in story_files[:1]:
                 sdata = await download_drive_file(sf["id"])
                 if sdata:
                     sfile = discord.File(io.BytesIO(sdata), filename=sf["name"])
-                    ms = await interaction.channel.send(content=f"STORY 1/1 - {chosen['name']} (meme visage)", file=sfile)
+                    ms = await interaction.channel.send(content=f"STORY 1/1 - {chosen['name']}", file=sfile)
                     sent.append(ms)
-        else:
-            ms = await interaction.channel.send(content=f"STORY 1/1 - {chosen['name']} - Va dans #story / #photo pour 1 story meme visage")
-            sent.append(ms)
-        await interaction.followup.send(f"Pack **{chosen['name']}** genere ICI avec VRAIES VIDEOS BOSS! Descriptions copiables - Supprime auto dans 20min", ephemeral=True)
+        await interaction.followup.send(f"Pack {chosen['name']} genere BOSS!", ephemeral=True)
         await asyncio.sleep(1200)
         for msg in sent:
             try: await msg.delete()
@@ -368,7 +350,7 @@ async def setupbusiness(ctx): await ctx.send(f"Setup business OK BOSS - {NOM_AGE
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setuppack(ctx):
-    embed = discord.Embed(title="PACK REELS 8+1 - RAMANE OFM", description="Clique pour generer ton pack 8 Reels + 1 Story dans ce meme salon\n\nAuto-delete 20min - Descriptions qui percent incluses + VRAIES VIDEOS", color=0xE1306C)
+    embed = discord.Embed(title="PACK REELS 8+1 - RAMANE OFM", description="Clique pour generer ton pack 8 Reels + 1 Story dans ce meme salon\nAuto-delete 20min - VRAIES VIDEOS", color=0xE1306C)
     await ctx.send(embed=embed, view=PackGenerateView())
 
 @bot.command()
@@ -402,7 +384,31 @@ async def boss(ctx, member: discord.Member): await add_grade_logic(ctx, member, 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def removegrade(ctx, member: discord.Member, *, grade: str):
-    role = get_real_role(ctx.guild, grade)
-    if role:
-        await member.remove_roles(role)
-        await ctx.send(
+    r = get_real_role(ctx.guild, grade)
+    if r:
+        await member.remove_roles(r)
+        await ctx.send(r.name)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def fixcolors(ctx): await auto_fix_colors(); await ctx.send("Couleurs fixees")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def clean(ctx, amount: int = 10): await ctx.channel.purge(limit=amount); await ctx.send(f"{amount} messages supprimes", delete_after=3)
+
+if __name__ == "__main__":
+    threading.Thread(target=run_flask, daemon=True).start()
+    print("Flask lance")
+    if not TOKEN:
+        print("DISCORD_TOKEN MANQUANT!")
+        while True: time.sleep(60)
+    while True:
+        try:
+            print(f"Lancement {NOM_AGENCE}...")
+            bot.run(TOKEN)
+        except Exception as e:
+            print(f"ERREUR BOT: {e}")
+            traceback.print_exc()
+            print("Redemarrage dans 10s...")
+            time.sleep(10)
