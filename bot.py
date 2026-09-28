@@ -42,7 +42,7 @@ async def list_drive_files(folder_id):
     if not GOOGLE_DRIVE_API_KEY or not folder_id: return []
     try:
         url = "https://www.googleapis.com/drive/v3/files"
-        params = {"q": f"'{folder_id}' in parents and trashed=false", "key": GOOGLE_DRIVE_API_KEY, "fields": "files(id,name,mimeType)", "pageSize": 100}
+        params = {"q": "'" + folder_id + "' in parents and trashed=false", "key": GOOGLE_DRIVE_API_KEY, "fields": "files(id,name,mimeType)", "pageSize": 100}
         async with aiohttp.ClientSession() as s:
             async with s.get(url, params=params, timeout=15) as r:
                 if r.status!= 200: return []
@@ -53,7 +53,7 @@ async def list_drive_files(folder_id):
 async def download_drive_file(file_id):
     if not GOOGLE_DRIVE_API_KEY: return None
     try:
-        url = f"https://www.googleapis.com/drive/v3/files/{file_id}"
+        url = "https://www.googleapis.com/drive/v3/files/" + file_id
         params = {"alt": "media", "key": GOOGLE_DRIVE_API_KEY}
         async with aiohttp.ClientSession() as s:
             async with s.get(url, params=params, timeout=60) as r:
@@ -65,7 +65,7 @@ async def get_solde_5sim():
     global solde_cache, dernier_check
     if time.time() - dernier_check < 120 and solde_cache!= 0: return solde_cache
     try:
-        headers = {"Authorization": f"Bearer {FIVESIM_TOKEN}", "Accept": "application/json"}
+        headers = {"Authorization": "Bearer " + FIVESIM_TOKEN, "Accept": "application/json"}
         async with aiohttp.ClientSession() as s:
             async with s.get("https://5sim.net/v1/user/profile", headers=headers, timeout=10) as r:
                 text = await r.text()
@@ -81,9 +81,9 @@ async def acheter_numero(service):
     solde = await get_solde_5sim()
     if solde!= -1 and solde < 0.10: return None, "STOCK_VIDE"
     try:
-        headers = {"Authorization": f"Bearer {FIVESIM_TOKEN}", "Accept": "application/json"}
+        headers = {"Authorization": "Bearer " + FIVESIM_TOKEN, "Accept": "application/json"}
         async with aiohttp.ClientSession() as s:
-            async with s.get(f"https://5sim.net/v1/user/buy/activation/any/any/{service}", headers=headers) as r:
+            async with s.get("https://5sim.net/v1/user/buy/activation/any/any/" + service, headers=headers) as r:
                 text = await r.text()
                 if r.status!= 200: return None, "STOCK_VIDE"
                 data = json.loads(text)
@@ -95,11 +95,11 @@ class GenerateView(discord.ui.View):
     def __init__(self, service_type):
         super().__init__(timeout=None)
         self.service_type = service_type
-        self.children[0].custom_id = f"gen_{service_type}"
+        self.children[0].custom_id = "gen_" + service_type
     @discord.ui.button(label="Generer un numero - 200F", style=discord.ButtonStyle.success)
     async def generate(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        embed = discord.Embed(title=f"PAIEMENT 200F - {NOM_AGENCE}", description=f"**Service:** {self.service_type.upper()}\n\n**1. MoMo:** `{MOMO_NUM}`\n**2. USDT BEP20:** `{CRYPTO_ADDR}`\n\nPaye et envoie capture ICI.", color=0x00ff00)
+        embed = discord.Embed(title="PAIEMENT 200F - " + NOM_AGENCE, description="**Service:** " + self.service_type.upper() + "\n\n**1. MoMo:** " + MOMO_NUM + "\n**2. USDT BEP20:** " + CRYPTO_ADDR + "\n\nPaye et envoie capture ICI.", color=0x00ff00)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 class StockView(discord.ui.View):
@@ -111,8 +111,8 @@ class StockView(discord.ui.View):
     async def solde(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         solde = await get_solde_5sim()
-        if solde == -1: await interaction.followup.send(f"Erreur 5SIM", ephemeral=True)
-        else: await interaction.followup.send(f"Solde 5SIM: **{solde}$**", ephemeral=True)
+        if solde == -1: await interaction.followup.send("Erreur 5SIM", ephemeral=True)
+        else: await interaction.followup.send("Solde 5SIM: " + str(solde) + "$", ephemeral=True)
     @discord.ui.button(label="Comment recharger 5SIM?", style=discord.ButtonStyle.secondary)
     async def tuto(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
@@ -124,14 +124,14 @@ class ValidationView(discord.ui.View):
         super().__init__(timeout=None)
         self.client_id = client_id
         self.service_type = service_type
-        self.children[0].custom_id = f"val_momo_{client_id}"
-        self.children[1].custom_id = f"val_crypto_{client_id}"
-        self.children[2].custom_id = f"val_refuse_{client_id}"
+        self.children[0].custom_id = "val_momo_" + str(client_id)
+        self.children[1].custom_id = "val_crypto_" + str(client_id)
+        self.children[2].custom_id = "val_refuse_" + str(client_id)
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.guild_permissions.administrator: return True
         for r in interaction.guild.roles:
             if "boss" in r.name.lower() and r in interaction.user.roles: return True
-        await interaction.response.send_message(f"Seul le BOSS peut valider.", ephemeral=True)
+        await interaction.response.send_message("Seul le BOSS peut valider.", ephemeral=True)
         return False
     @discord.ui.button(label="Recu MoMo", style=discord.ButtonStyle.success)
     async def momo(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -143,53 +143,48 @@ class ValidationView(discord.ui.View):
         await self.lancer_achat_infini(interaction)
     @discord.ui.button(label="Refuse", style=discord.ButtonStyle.danger)
     async def refuse(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(f"<@{interaction.user.id}> a refuse <@{self.client_id}>", ephemeral=False)
+        await interaction.response.send_message("<@" + str(interaction.user.id) + "> a refuse <@" + str(self.client_id) + ">", ephemeral=False)
     async def lancer_achat_infini(self, interaction):
         channel = interaction.channel
         solde = await get_solde_5sim()
         if solde!= -1 and solde < 0.10:
-            await channel.send(f"Stock vide doit recharger {solde}$ - <@{self.client_id}>", delete_after=300)
+            await channel.send("Stock vide doit recharger " + str(solde) + "$ - <@" + str(self.client_id) + ">", delete_after=300)
             return
-        await channel.send(f"Valide par <@{interaction.user.id}> pour <@{self.client_id}>. Achat en cours...", delete_after=300)
+        await channel.send("Valide par <@" + str(interaction.user.id) + "> pour <@" + str(self.client_id) + ">. Achat en cours...", delete_after=300)
         tentative = 1
         while True:
             try:
                 tel, order_id = await acheter_numero(self.service_type)
                 if order_id == "STOCK_VIDE":
-                    await channel.send(f"Stock vide, recharge sur 5sim.net - <@{self.client_id}>", delete_after=300)
+                    await channel.send("Stock vide, recharge sur 5sim.net - <@" + str(self.client_id) + ">", delete_after=300)
                     break
                 if not tel:
-                    await channel.send(f"Erreur 5SIM T{tentative} <@{self.client_id}> retente 20s...", delete_after=120)
+                    await channel.send("Erreur 5SIM T" + str(tentative) + " <@" + str(self.client_id) + "> retente 20s...", delete_after=120)
                     await asyncio.sleep(20); tentative+=1; continue
-                await channel.send(f"<@{self.client_id}> NUMERO: `{tel}` ID:{order_id} - Attente code...", delete_after=600)
+                await channel.send("<@" + str(self.client_id) + "> NUMERO: " + tel + " ID:" + order_id + " - Attente code...", delete_after=600)
                 code=None
                 async with aiohttp.ClientSession() as session:
-                    headers = {"Authorization": f"Bearer {FIVESIM_TOKEN}", "Accept": "application/json"}
+                    headers = {"Authorization": "Bearer " + FIVESIM_TOKEN, "Accept": "application/json"}
                     for _ in range(16):
                         await asyncio.sleep(30)
-                        async with session.get(f"https://5sim.net/v1/user/check/{order_id}", headers=headers) as check_resp:
+                        async with session.get("https://5sim.net/v1/user/check/" + order_id, headers=headers) as check_resp:
                             try:
                                 check_data = await check_resp.json()
                                 if check_data.get("sms") and len(check_data["sms"])>0:
                                     code=check_data["sms"][0]["code"]; break
                             except: continue
                     if code:
-                        await channel.send(f"<@{self.client_id}> CODE: `{code}` - Numero {tel} - Benefice 110F", delete_after=600)
+                        await channel.send("<@" + str(self.client_id) + "> CODE: " + code + " - Numero " + tel + " - Benefice 110F", delete_after=600)
                         break
                     else:
-                        async with session.get(f"https://5sim.net/v1/user/cancel/{order_id}", headers=headers):
-                            await channel.send(f"<@{self.client_id}> Pas de code T{tentative}. CANCEL + RACHAT...", delete_after=300)
+                        async with session.get("https://5sim.net/v1/user/cancel/" + order_id, headers=headers):
+                            await channel.send("<@" + str(self.client_id) + "> Pas de code T" + str(tentative) + ". CANCEL + RACHAT...", delete_after=300)
                         tentative+=1; await asyncio.sleep(5); continue
             except Exception as e:
-                await channel.send(f"Erreur {e}", delete_after=120); await asyncio.sleep(10); continue
-
-BOSS_PRIVATE_NAME = "mon-stock-5sim"
-GRADE_COLORS = {"Manager": 0x3498db, "Team Leader": 0x2ecc71, "VA Pro": 0x9b59b6, "VA DEBUTANT": 0xe91e63, "BOSS": 0xe74c3c}
+                await channel.send("Erreur " + str(e), delete_after=120); await asyncio.sleep(10); continue
 
 def get_real_role(guild, keyword):
     keyword = keyword.lower()
-    for r in guild.roles:
-        if keyword in r.name.lower() and ("🔰" in r.name or "📚" in r.name or "📖" in r.name): return r
     for r in guild.roles:
         if keyword in r.name.lower(): return r
     return None
@@ -211,15 +206,10 @@ async def add_grade_logic(ctx, member: discord.Member, keyword: str):
     role = get_real_role(guild, keyword)
     if not role: role = discord.utils.get(guild.roles, name=keyword)
     if not role:
-        try: role = await guild.create_role(name=keyword, color=discord.Color(GRADE_COLORS.get(keyword, 0x3498db)))
-        except: await ctx.send(f"Role {keyword} introuvable"); return
-    try:
-        if guild.me.top_role.position <= role.position: await role.edit(position=guild.me.top_role.position - 1)
-    except: pass
-    if guild.me.top_role.position <= role.position:
-        await ctx.send(f"Monte mon role en haut BOSS"); return
+        try: role = await guild.create_role(name=keyword, color=discord.Color(0x3498db))
+        except: await ctx.send("Role " + keyword + " introuvable"); return
     await member.add_roles(role)
-    await ctx.send(f"{member.mention} est maintenant **{role.name}** BOSS")
+    await ctx.send(member.mention + " est maintenant " + role.name + " BOSS")
 
 DRIVE_REGEX = r"https://drive\.google\.com/drive/folders/[a-zA-Z0-9-_]+[^\s]*"
 def find_channel(guild, keywords):
@@ -265,7 +255,7 @@ class PackGenerateView(discord.ui.View):
         chosen = random.choice(drive_links)
         descs = await get_all_descriptions(guild)
         if len(descs) < 8:
-            await interaction.followup.send(f"Pas assez de descriptions ({len(descs)}/8) BOSS", ephemeral=True)
+            await interaction.followup.send("Pas assez de descriptions (" + str(len(descs)) + "/8) BOSS", ephemeral=True)
             return
         selected_descs = random.sample(descs, 8)
         if not GOOGLE_DRIVE_API_KEY:
@@ -286,15 +276,15 @@ class PackGenerateView(discord.ui.View):
         if len(video_files) == 0: video_files = reels_files
         video_files = video_files[:8]
         sent = []
-        embed = discord.Embed(title=f"{chosen['name']} | PACK 8", description=f"Model: {chosen['name']}\nDelivery: Instant | Auto-delete 20min", color=0xE1306C)
-        m = await interaction.channel.send(content=f"PACK pour {interaction.user.mention} - **{chosen['name']}**", embed=embed)
+        embed = discord.Embed(title=chosen['name'] + " | PACK 8", description="Model: " + chosen['name'] + "\nDelivery: Instant | Auto-delete 20min", color=0xE1306C)
+        m = await interaction.channel.send(content="PACK pour " + interaction.user.mention + " - **" + chosen['name'] + "**", embed=embed)
         sent.append(m)
         for i, vf in enumerate(video_files):
             data = await download_drive_file(vf["id"])
             if not data: continue
             file_obj = discord.File(io.BytesIO(data), filename=vf["name"])
-            desc_copiable = f"```\n{selected_descs[i][:1000]}\n```"
-            txt = f"**REEL {i+1}/8 - {chosen['name']}**\n{desc_copiable}"
+            desc_copiable = "```\n" + selected_descs[i][:1000] + "\n```"
+            txt = "**REEL " + str(i+1) + "/8 - " + chosen['name'] + "**\n" + desc_copiable
             mm = await interaction.channel.send(content=txt, file=file_obj)
             sent.append(mm)
         story_channel = find_channel(guild, ["photos-story-cta", "photos-story", "story", "cta"])
@@ -305,13 +295,13 @@ class PackGenerateView(discord.ui.View):
                 sdata = await download_drive_file(sf["id"])
                 if sdata:
                     sfile = discord.File(io.BytesIO(sdata), filename=sf["name"])
-                    await target_story_chan.send(content=f"**STORY 1/1 - {chosen['name']}** pour {interaction.user.mention}", file=sfile)
-            await interaction.followup.send(f"Pack {chosen['name']} genere BOSS! 8 Reels ici + 1 Story dans {target_story_chan.mention}", ephemeral=True)
+                    await target_story_chan.send(content="**STORY 1/1 - " + chosen['name'] + "** pour " + interaction.user.mention, file=sfile)
+            await interaction.followup.send("Pack " + chosen['name'] + " genere BOSS! 8 Reels ici + 1 Story dans " + target_story_chan.mention, ephemeral=True)
         else:
             if story_channel:
-                await interaction.followup.send(f"Pack {chosen['name']} genere BOSS! 8 Reels ici.\n⚠️ Ce Drive n'a pas de Story -> Va prendre 1 Story dans {story_channel.mention} pour completer ton 8+1", ephemeral=True)
+                await interaction.followup.send("Pack " + chosen['name'] + " genere BOSS! 8 Reels ici. Ce Drive n'a pas de Story -> Va prendre 1 Story dans " + story_channel.mention, ephemeral=True)
             else:
-                await interaction.followup.send(f"Pack {chosen['name']} genere BOSS! 8 Reels ici. ⚠️ Pas de Story dans ce Drive.", ephemeral=True)
+                await interaction.followup.send("Pack " + chosen['name'] + " genere BOSS! 8 Reels ici. Pas de Story dans ce Drive.", ephemeral=True)
         await asyncio.sleep(1200)
         for msg in sent:
             try: await msg.delete()
@@ -339,7 +329,7 @@ async def on_message(message):
     if message.author.bot: return
     if message.attachments and ("numero-gmail" in message.channel.name or "numero-insta" in message.channel.name):
         service = "google" if "gmail" in message.channel.name else "instagram"
-        embed = discord.Embed(title="NOUVELLE PREUVE 200F", description=f"Client: {message.author.mention}\nService: {service}", color=0xffa500)
+        embed = discord.Embed(title="NOUVELLE PREUVE 200F", description="Client: " + message.author.mention + "\nService: " + service, color=0xffa500)
         embed.set_image(url=message.attachments[0].url)
         try: await message.delete(delay=300)
         except: pass
@@ -347,18 +337,14 @@ async def on_message(message):
     await bot.process_commands(message)
 
 @bot.command()
-async def ping(ctx): await ctx.send(f"Pong! {NOM_AGENCE}")
+async def ping(ctx): await ctx.send("Pong! " + NOM_AGENCE)
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def setupbusiness(ctx): await ctx.send(f"Setup business OK BOSS - {NOM_AGENCE}")
+async def setupbusiness(ctx): await ctx.send("Setup business OK BOSS - " + NOM_AGENCE)
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setuppack(ctx):
-    embed = discord.Embed(
-        title="PACK REELS 8+1",
-        description="**RAMANE OFM - MEDIA DISTRIBUTION**\n\n▸ 8 VIRAL REELS [HD - No Watermark]\n▸ 1 STORY BONUS\n▸ 8 COPY-PASTE CAPTIONS\n\nAuto-delete 20min | Instant Delivery",
-        color=0xE1306C
-    )
+    embed = discord.Embed(title="PACK REELS 8+1", description="**RAMANE OFM - MEDIA DISTRIBUTION**\n\n8 VIRAL REELS [HD]\n1 STORY BONUS\n8 CAPTIONS\n\nAuto-delete 20min", color=0xE1306C)
     embed.set_footer(text="Clique ci-dessous pour generer")
     await ctx.send(embed=embed, view=PackGenerateView())
 @bot.command()
@@ -396,4 +382,20 @@ async def fixcolors(ctx): await auto_fix_colors(); await ctx.send("Couleurs fixe
 @commands.has_permissions(administrator=True)
 async def clean(ctx, amount: int = 10):
     await ctx.channel.purge(limit=amount)
-    await ctx.send(f"{amount} messages supprimes", delete_after=3
+    await ctx.send(str(amount) + " messages supprimes", delete_after=3)
+
+if __name__ == "__main__":
+    threading.Thread(target=run_flask, daemon=True).start()
+    print("Flask lance")
+    if not TOKEN:
+        print("DISCORD_TOKEN MANQUANT!")
+        while True: time.sleep(60)
+    while True:
+        try:
+            print("Lancement " + NOM_AGENCE + "...")
+            bot.run(TOKEN)
+        except Exception as e:
+            print("ERREUR BOT: " + str(e))
+            traceback.print_exc()
+            print("Redemarrage dans 10s...")
+            time.sleep(10)
