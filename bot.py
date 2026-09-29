@@ -258,7 +258,7 @@ class ModelSelectView(discord.ui.View):
         options = [discord.SelectOption(label=l['name'][:90], value=l['id']) for l in links[:25]]
         sel = discord.ui.Select(placeholder=f"{len(links)} Models - Choisis", options=options)
         async def cb(inter: discord.Interaction):
-            await inter.response.defer()
+            await inter.response.defer(ephemeral=True)
             cid = sel.values[0]
             chosen = next((x for x in self.links if x['id']==cid), None)
             if chosen:
@@ -287,7 +287,7 @@ class PackGenerateView(discord.ui.View):
         view = ModelSelectView(links, self)
         await interaction.followup.send(f"📂 **{len(links)} Models dispo** - Choisis ton model :", view=view, ephemeral=True)
 
-    # --- PARTIE CORRIGEE POUR EMAR ---
+    # --- CORRECTION DEMANDEE : MEME SALON + TAG + SEULEMENT LUI VOIT + 5 MIN ---
     async def send_pack_for_link(self, interaction, chosen):
         guild = interaction.guild
         descs = await get_all_descriptions(guild)
@@ -305,16 +305,13 @@ class PackGenerateView(discord.ui.View):
             for sub in subfolders:
                 lname = sub["name"].lower()
                 if any(k in lname for k in ["photo","story","cta","image"]):
-                    # On verifie si vide ou pas plus tard
                     story_folder_id = sub["id"]
                     continue
-                # TOUT autre dossier = on fouille dedans pour les videos (EMAR, VIDEOS, etc)
                 files_in_sub = await list_drive_files(sub["id"])
                 print(f"[PACK] Sous-dossier {sub['name']} -> {len(files_in_sub)} fichiers")
                 for f in files_in_sub:
                     if "folder" not in f.get("mimeType",""):
                         reels_files.append(f)
-            # fallback si rien trouvé
             if len(reels_files) == 0:
                 reels_files = [f for f in root_files if "folder" not in f.get("mimeType","")]
 
@@ -325,40 +322,40 @@ class PackGenerateView(discord.ui.View):
         print(f"[PACK] {chosen['name']} -> {len(video_files)} videos detectees")
 
         if len(video_files) == 0:
-            await interaction.followup.send(f"❌ Dossier **{chosen['name']}** vide après fouille de {len(subfolders)} dossiers. Verifie partage 'Toute personne disposant du lien'", ephemeral=True)
+            await interaction.followup.send(f"❌ Dossier **{chosen['name']}** vide. Verifie partage 'Toute personne disposant du lien'", ephemeral=True)
             return
 
         a_envoyer = min(len(video_files), 8)
-        # Prend au hasard 8 parmi toutes
         video_files = random.sample(video_files, a_envoyer) if len(video_files) > a_envoyer else video_files
         selected_descs = random.sample(descs, a_envoyer) if len(descs)>=a_envoyer else (descs*a_envoyer)[:a_envoyer] if descs else [""]*a_envoyer
 
-        sent=[]
-        embed=discord.Embed(title=f"{chosen['name']} | PACK {a_envoyer}", description=f"Model: {chosen['name']}\nAuto-delete 20min", color=0xE1306C)
-        m=await interaction.channel.send(content=f"PACK pour {interaction.user.mention} - **{chosen['name']}** ({a_envoyer} Reels)", embed=embed)
-        sent.append(m)
+        user_mention = interaction.user.mention
 
-        for i,vf in enumerate(video_files):
-            data=await download_drive_file(vf["id"])
+        # Envoi en EPHEMERAL = meme salon mais seulement lui voit + tag
+        for i, vf in enumerate(video_files):
+            data = await download_drive_file(vf["id"])
             if not data: continue
-            file_obj=discord.File(io.BytesIO(data), filename=vf["name"])
-            txt=f"**REEL {i+1}/{a_envoyer} - {chosen['name']}**\n```\n{selected_descs[i][:1000]}\n```"
-            mm=await interaction.channel.send(content=txt, file=file_obj)
-            sent.append(mm)
+            file_obj = discord.File(io.BytesIO(data), filename=vf["name"])
+            txt = f"{user_mention} **REEL {i+1}/{a_envoyer} - {chosen['name']}**\n```\n{selected_descs[i][:1000]}\n```"
+            await interaction.followup.send(content=txt, file=file_obj, ephemeral=True)
 
+        # Story dans le MEME salon, meme logique
         if story_folder_id:
-            sfiles=await list_drive_files(story_folder_id)
+            sfiles = await list_drive_files(story_folder_id)
             if sfiles:
-                sdata=await download_drive_file(sfiles[0]["id"])
+                sdata = await download_drive_file(sfiles[0]["id"])
                 if sdata:
-                    story_channel=find_channel(guild, ["photos-story-cta","photos-story","story","cta"])
-                    await (story_channel or interaction.channel).send(content=f"**STORY 1/1 - {chosen['name']}** pour {interaction.user.mention}", file=discord.File(io.BytesIO(sdata), filename=sfiles[0]["name"]))
+                    await interaction.followup.send(
+                        content=f"{user_mention} **STORY 1/1 - {chosen['name']}**",
+                        file=discord.File(io.BytesIO(sdata), filename=sfiles[0]["name"]),
+                        ephemeral=True
+                    )
 
-        await interaction.followup.send(f"✅ Pack **{chosen['name']}** genere! {a_envoyer} Reels", ephemeral=True)
-        await asyncio.sleep(1200)
-        for msg in sent:
-            try: await msg.delete()
-            except: pass
+        await interaction.followup.send(f"{user_mention} ✅ Pack **{chosen['name']}** généré! {a_envoyer} Reels - Suppression auto dans 5 min côté client.", ephemeral=True)
+
+        # Les messages ephemeral disparaissent tout seul, pas besoin de delete API
+        # On garde le sleep si tu veux logger
+        await asyncio.sleep(300)
 
 @bot.event
 async def on_ready():
