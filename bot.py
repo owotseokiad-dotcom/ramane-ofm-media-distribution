@@ -86,18 +86,54 @@ async def get_solde_5sim():
 
 async def acheter_numero(service):
     solde = await get_solde_5sim()
-    if solde!= -1 and solde < 0.10: return None, "STOCK_VIDE"
-    try:
-        headers = {"Authorization": "Bearer " + FIVESIM_TOKEN, "Accept": "application/json"}
-        async with aiohttp.ClientSession() as s:
-            async with s.get(f"https://5sim.net/v1/user/buy/activation/any/any/{service}", headers=headers) as r:
-                text = await r.text()
-                if r.status!= 200: return None, "STOCK_VIDE"
-                data = json.loads(text)
-                if "phone" not in data or "id" not in data: return None, "STOCK_VIDE"
-                return str(data["phone"]).replace("+",""), str(data["id"])
-    except: return None, "STOCK_VIDE"
+    if solde != -1 and solde < 0.10:
+        return None, "STOCK_VIDE"
 
+    if service == "google":
+        pays_liste = ["usa", "canada", "england", "ukraine"]
+    else:
+        pays_liste = ["usa"]
+
+    headers = {"Authorization": "Bearer " + FIVESIM_TOKEN, "Accept": "application/json"}
+
+    try:
+        async with aiohttp.ClientSession() as s:
+            meilleur_pays = None
+            meilleur_op = None
+            prix_min = float("inf")
+
+            for country in pays_liste:
+                prices_url = f"https://5sim.net/v1/guest/prices?country={country}&product={service}"
+                async with s.get(prices_url, headers=headers, timeout=10) as r:
+                    if r.status != 200:
+                        continue
+                    prices_data = await r.json()
+
+                service_prices = prices_data.get(country, {}).get(service, {})
+                for operator, details in service_prices.items():
+                    price = details.get("cost", float("inf"))
+                    count = details.get("count", 0)
+                    if count > 0 and price < prix_min:
+                        prix_min = price
+                        meilleur_op = operator
+                        meilleur_pays = country
+
+            if not meilleur_pays or not meilleur_op:
+                return None, "STOCK_VIDE"
+
+            buy_url = f"https://5sim.net/v1/user/buy/activation/{meilleur_pays}/{meilleur_op}/{service}"
+            async with s.get(buy_url, headers=headers, timeout=15) as r:
+                text = await r.text()
+                if r.status != 200:
+                    return None, "STOCK_VIDE"
+                data = json.loads(text)
+                if "phone" not in data or "id" not in data:
+                    return None, "STOCK_VIDE"
+                return str(data["phone"]).replace("+", ""), str(data["id"])
+
+    except Exception as e:
+        print(f"[5SIM BUY ERR] {e}")
+        return None, "STOCK_VIDE"
 class GenerateView(discord.ui.View):
     def __init__(self, service_type):
         super().__init__(timeout=None)
