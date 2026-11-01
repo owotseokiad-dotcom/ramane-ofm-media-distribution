@@ -267,4 +267,137 @@ class ModelSelectView(discord.ui.View):
         self.add_item(sel)
 
 class PackGenerateView(discord.ui.View):
-    def __
+    def __init__(self):
+        super().__init__(timeout=None)
+    @discord.ui.button(label="Pack Aleatoire", style=discord.ButtonStyle.success, emoji="🎲", custom_id="pack_auto_v4")
+    async def auto_pack(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        links = await get_all_drive_links(interaction.guild)
+        if not links:
+            await interaction.followup.send("Aucun lien dans #drive-reels BOSS", ephemeral=True)
+            return
+        await self.send_pack_for_link(interaction, random.choice(links))
+    @discord.ui.button(label="Choisir un Model", style=discord.ButtonStyle.primary, emoji="📂", custom_id="pack_choose_v4")
+    async def choose_pack(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        links = await get_all_drive_links(interaction.guild)
+        if not links:
+            await interaction.followup.send("Aucun lien", ephemeral=True)
+            return
+        view = ModelSelectView(links, self)
+        await interaction.followup.send(f"📂 **{len(links)} Models dispo** - Choisis ton model :", view=view, ephemeral=True)
+
+    async def send_pack_for_link(self, interaction, chosen):
+        guild = interaction.guild
+        descs = await get_all_descriptions(guild)
+        main_folder_id = chosen['id']
+        root_files = await list_drive_files(main_folder_id)
+        print(f"[PACK] {chosen['name']} root contient {len(root_files)} items")
+
+        reels_files = []
+        story_folder_id = None
+        subfolders = [f for f in root_files if "folder" in f.get("mimeType","")]
+
+        if not subfolders:
+            reels_files = root_files
+        else:
+            for sub in subfolders:
+                lname = sub["name"].lower()
+                if any(k in lname for k in ["photo","story","cta","image"]):
+                    story_folder_id = sub["id"]
+                    continue
+                files_in_sub = await list_drive_files(sub["id"])
+                print(f"[PACK] Sous-dossier {sub['name']} -> {len(files_in_sub)} fichiers")
+                for f in files_in_sub:
+                    if "folder" not in f.get("mimeType",""):
+                        reels_files.append(f)
+            if len(reels_files) == 0:
+                reels_files = [f for f in root_files if "folder" not in f.get("mimeType","")]
+
+        video_files = [f for f in reels_files if "video" in f.get("mimeType","") or f["name"].lower().endswith((".mp4",".mov",".mkv",".avi",".m4v"))]
+        if len(video_files) == 0:
+            video_files = [f for f in reels_files if "folder" not in f.get("mimeType","")]
+
+        print(f"[PACK] {chosen['name']} -> {len(video_files)} videos detectees")
+
+        if len(video_files) == 0:
+            await interaction.followup.send(f"❌ Dossier **{chosen['name']}** vide. Verifie partage 'Toute personne disposant du lien'", ephemeral=True)
+            return
+
+        a_envoyer = min(len(video_files), 8)
+        video_files = random.sample(video_files, a_envoyer) if len(video_files) > a_envoyer else video_files
+        selected_descs = random.sample(descs, a_envoyer) if len(descs)>=a_envoyer else (descs*a_envoyer)[:a_envoyer] if descs else [""]*a_envoyer
+
+        user_mention = interaction.user.mention
+
+        for i, vf in enumerate(video_files):
+            data = await download_drive_file(vf["id"])
+            if not data: continue
+            file_obj = discord.File(io.BytesIO(data), filename=vf["name"])
+            txt = f"{user_mention} **REEL {i+1}/{a_envoyer} - {chosen['name']}**\n```\n{selected_descs[i][:1000]}\n```"
+            await interaction.followup.send(content=txt, file=file_obj, ephemeral=True)
+
+        if story_folder_id:
+            sfiles = await list_drive_files(story_folder_id)
+            if sfiles:
+                sdata = await download_drive_file(sfiles[0]["id"])
+                if sdata:
+                    await interaction.followup.send(
+                        content=f"{user_mention} **STORY 1/1 - {chosen['name']}**",
+                        file=discord.File(io.BytesIO(sdata), filename=sfiles[0]["name"]),
+                        ephemeral=True
+                    )
+
+        await interaction.followup.send(f"{user_mention} ✅ Pack **{chosen['name']}** généré! {a_envoyer} Reels - Suppression auto dans 5 min côté client.", ephemeral=True)
+        await asyncio.sleep(300)
+
+@bot.event
+async def on_ready():
+    print(f"Connecte {bot.user}")
+    bot.add_view(GenerateView("google"))
+    bot.add_view(GenerateView("instagram"))
+    bot.add_view(StockView())
+    bot.add_view(PackGenerateView())
+    await auto_fix_colors()
+    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="RAMANE OFM - PACK REELS 8+1"))
+
+@bot.event
+async def on_member_join(member):
+    role = get_real_role(member.guild, "VA DEBUTANT")
+    if role:
+        try: await member.add_roles(role)
+        except: pass
+
+@bot.event
+async def on_message(message):
+    if message.author.bot: return
+    if message.attachments and ("numero-gmail" in message.channel.name or "numero-insta" in message.channel.name):
+        service = "google" if "gmail" in message.channel.name else "instagram"
+        embed = discord.Embed(title="NOUVELLE PREUVE 200F", description=f"Client: {message.author.mention}\nService: {service}", color=0xffa500)
+        embed.set_image(url=message.attachments[0].url)
+        try: await message.delete(delay=300)
+        except: pass
+        await message.channel.send(embed=embed, view=ValidationView(message.author.id, service), delete_after=600)
+    await bot.process_commands(message)
+
+@bot.command()
+async def ping(ctx): await ctx.send(f"Pong! {NOM_AGENCE}")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setupbusiness(ctx): await ctx.send(f"Setup business OK BOSS - {NOM_AGENCE}")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setuppack(ctx):
+    embed = discord.Embed(
+        title="🎬 RAMANE OFM - GENERATEUR DE PACK",
+        description="**Le bot fait quoi?**\nIl prend TOUS les liens que le BOSS met dans #drive-reels et te livre le pack complet.\n\n**2 options :**\n🎲 **Pack Aleatoire** : Bot choisit un model au hasard\n📂 **Choisir un Model** : Tu choisis ton model (liste des noms)\n\n**3 Avantages :**\n1️⃣ **Rapide** : 8 Reels HD + 1 Story + Captions en 10s\n2️⃣ **Pro** : Descriptions pretes a copier-coller\n3️⃣ **Propre** : Auto-delete 20min, salon propre\n\n👇 **Clique ci-dessous**",
+        color=0xE1306C
+    )
+    embed.set_footer(text="RAMANE OFM - Tous les liens Drive sont accessibles")
+    await ctx.send(embed=embed, view=PackGenerateView())
+
+if __name__ == "__main__":
+    threading.Thread(target=run_flask).start()
+    bot.run(TOKEN)
